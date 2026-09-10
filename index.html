@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#050911">
+  <title>微光 · SOLAR</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <canvas id="universe" aria-label="太空游戏，左键点击设定推进方向，点击自己的天体停止推进"></canvas>
+  <header class="brand"><span class="brand-mark">✳</span><div>微光 <span class="english">/ SOLAR</span><small>一粒尘埃，也有自己的宇宙。</small></div></header>
+  <section class="telemetry" aria-label="天体状态">
+    <div class="eyebrow">YOUR CELESTIAL BODY</div>
+    <div class="stage-line"><span id="stage-dot"></span><h1 id="stage">小行星</h1><span id="stage-size">2 PX</span></div>
+    <div class="stats"><div><label>质量</label><strong id="mass">8.0</strong></div><div><label>速度</label><strong id="speed">0.0</strong></div><div><label>卫星</label><strong id="satellites">0</strong></div></div>
+    <div class="progress-label"><span id="next-stage">下一阶段 · 岩质行星</span><span id="progress-text">0%</span></div>
+    <div class="progress-track"><i id="progress"></i></div>
+    <p id="drive-status">惯性滑行</p>
+  </section>
+  <nav class="controls" aria-label="游戏控制"><button id="orbits" aria-pressed="true">轨迹 <kbd>O</kbd></button><button id="pause" aria-pressed="false">暂停 <kbd>空格</kbd></button><button id="help" aria-expanded="false">操作 <kbd>?</kbd></button></nav>
+  <aside id="help-panel" hidden>
+    <h2>在引力中航行</h2>
+    <p>左键点击：向该方向持续推进。</p>
+    <p>点击自身的圆环：关闭推进，惯性滑行。</p>
+    <p>反向推进可以减速。低速接触小天体可吸收，高速碰撞会碎裂。</p>
+    <p>晋升为岩质行星后，低速伴飞可捕获卫星。</p>
+    <p>滚轮缩放 · O 显示轨迹 · 空格暂停</p>
+    <div id="type-legend" class="legend" aria-label="十二档天体类型"></div>
+    <small>尺寸为基础半径，档内最多增加 0.3px。光晕、光柱与星环不参与碰撞。鼠标悬停图例可查看质量门槛。</small>
+    <small>天体类型代表游戏晋升等级，顺序为游戏设定。</small>
+  </aside>
+  <div id="notice" role="status">点击星空，开始你的旅程</div>
+  <footer><span><i class="live-dot"></i><span id="world-status">引力场运行中</span></span><span id="scale">1.00×</span><span class="footer-right">程序宇宙 <b>·</b> 无尽漂流</span></footer>
+  <div id="end-screen" class="overlay" hidden><div class="end-card"><div class="eyebrow">THE UNIVERSE REMEMBERS</div><h2>归于星尘</h2><p id="end-description"></p><button id="restart">再点亮一颗星 <span>↗</span></button></div></div>
+  <script src="game.js"></script>
+</body>
+</html>
