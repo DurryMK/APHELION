@@ -2,17 +2,17 @@
 
 globalThis.SolarConfig = {
   types: [
-    { name: "陨石", min: 0, radius: 2, color: "#a8b5c9", kind: "asteroid", level: -1, population: 0, techCap: 0, gravityRange: 40 },
-    { name: "原始行星", min: 12, radius: 2.5, color: "#b29b89", kind: "rock", level: 0, population: 0, techCap: 0, gravityRange: 70 },
-    { name: "水星型行星", min: 24, radius: 3, color: "#baaaa0", kind: "rock", level: 1, population: 500, techCap: 1, gravityRange: 90 },
-    { name: "火星型行星", min: 60, radius: 3.5, color: "#d58b70", kind: "rock", level: 2, population: 5000, techCap: 2, gravityRange: 110 },
-    { name: "地球型行星", min: 150, radius: 4, color: "#62dcc9", kind: "ice", level: 3, population: 50000, techCap: 3, gravityRange: 140 },
-    { name: "超级地球", min: 350, radius: 4.5, color: "#8f9dff", kind: "rock", level: 4, population: 500000, techCap: 4, gravityRange: 170 },
-    { name: "海王星型行星", min: 800, radius: 5, color: "#539dff", kind: "ice", level: 5, population: 5000000, techCap: 5, gravityRange: 210 },
-    { name: "木星型行星", min: 1600, radius: 6, color: "#e5b65f", kind: "gas", level: 6, population: 15000000, techCap: 5, gravityRange: 210 },
-    { name: "恒星", mass: 8000, radius: 6, color: "#ffda78", kind: "star", natural: true, gravityRange: 280, hazardRange: 24 },
-    { name: "中子星", mass: 14000, radius: 3, color: "#a28aff", kind: "neutron", natural: true, gravityRange: 330, hazardRange: 32 },
-    { name: "黑洞", mass: 24000, radius: 5, color: "#c49aff", kind: "black-hole", natural: true, gravityRange: 380, hazardRange: 40 }
+    { name: "Dust", min: 0, radius: 2, color: "#a8b5c9", kind: "asteroid", level: -1, population: 0, techCap: 0, gravityRange: 40 },
+    { name: "Core", min: 12, radius: 2.5, color: "#b29b89", kind: "rock", level: 0, population: 0, techCap: 0, gravityRange: 70 },
+    { name: "Luna", min: 24, radius: 3, color: "#baaaa0", kind: "rock", level: 1, population: 500, techCap: 1, gravityRange: 90 },
+    { name: "Mars", min: 60, radius: 3.5, color: "#d58b70", kind: "rock", level: 2, population: 5000, techCap: 2, gravityRange: 110 },
+    { name: "Terra", min: 150, radius: 4, color: "#62dcc9", kind: "ice", level: 3, population: 50000, techCap: 3, gravityRange: 140 },
+    { name: "Gaia", min: 350, radius: 4.5, color: "#8f9dff", kind: "rock", level: 4, population: 500000, techCap: 4, gravityRange: 170 },
+    { name: "Halo", min: 800, radius: 5, color: "#539dff", kind: "ice", level: 5, population: 5000000, techCap: 5, gravityRange: 210 },
+    { name: "Titan", min: 1600, radius: 6, color: "#e5b65f", kind: "gas", level: 6, population: 15000000, techCap: 5, gravityRange: 210 },
+    { name: "Sol", mass: 8000, radius: 6, color: "#ffda78", kind: "star", natural: true, gravityRange: 280, hazardRange: 24 },
+    { name: "Pulsar", mass: 14000, radius: 3, color: "#a28aff", kind: "neutron", natural: true, gravityRange: 330, hazardRange: 32 },
+    { name: "Void", mass: 24000, radius: 5, color: "#c49aff", kind: "black-hole", natural: true, gravityRange: 380, hazardRange: 40 }
   ],
   maxPlanetMass: 3200,
   physicsStep: 1 / 120,

@@ -169,7 +169,7 @@
     nextCivilization = time + CONFIG.civilization.tick; nextCombat = time + CONFIG.combat.tick;
     ui["end-screen"].hidden = true;
     ui["pause-screen"].close();
-    document.getElementById("save-status").textContent = "手动保存覆盖此浏览器内的上一份存档；返回起点不会自动保存。";
+    document.getElementById("save-status").textContent = "每秒自动保存 · 读档进入新沙盒。";
     // 出生点只保留两个疏松的小天体群，其他方向留出空白。
     const nearbyAngle = random(0, Math.PI * 2);
     for (let i = 0; i < POPULATION.nearby; i++) {
@@ -466,6 +466,8 @@
 
   function collide(a, b) {
     if (!a.alive || !b.alive) return;
+    // 同一主星的卫星之间不发生碰撞、融合或碰撞伤害。
+    if (a.host !== null && a.host === b.host) return;
     const sx = b.px - a.px, sy = b.py - a.py;
     const dx = (b.x - a.x) - sx, dy = (b.y - a.y) - sy;
     const t = clamp(-(sx * dx + sy * dy) / (dx * dx + dy * dy || 1), 0, 1);
@@ -714,7 +716,7 @@
     savedGame = null; load.disabled = true;
     try {
       const raw = localStorage.getItem(CONFIG.saveKey);
-      if (raw === null) { status.textContent = "暂无存档；游戏中按空格可保存。"; return; }
+      if (raw === null) { status.textContent = "暂无存档 · 开始后每秒自动保存。"; return; }
       const snapshot = JSON.parse(raw);
       if (!validSnapshot(snapshot)) { status.textContent = "存档内容无效，无法读取。"; return; }
       savedGame = snapshot; load.disabled = false;
@@ -728,7 +730,7 @@
     if (!player?.alive || ended || choosingStart) return;
     try {
       localStorage.setItem(CONFIG.saveKey, JSON.stringify(playerSnapshot()));
-      document.getElementById("save-status").textContent = "已保存。读档保留自身文明与质量，进入全新沙盒；陨石卫星不保存。";
+      document.getElementById("save-status").textContent = "已自动保存 · 每秒更新。";
     } catch (error) {
       document.getElementById("save-status").textContent = `保存失败：${error.message}`;
     }
@@ -1144,7 +1146,6 @@
   canvas.addEventListener("contextmenu", event => { event.preventDefault(); jumping = false; });
   canvas.addEventListener("wheel", event => { event.preventDefault(); camera.targetZoom = clamp(camera.targetZoom * Math.exp(-event.deltaY * .001), .5, 2.5); }, { passive: false });
   ui.pause.addEventListener("click", togglePause); ui.orbits.addEventListener("click", toggleOrbits);
-  document.getElementById("save-game").addEventListener("click", savePlayer);
   document.getElementById("load-save").addEventListener("click", () => {
     readSave();
     if (!savedGame) return;
@@ -1235,5 +1236,7 @@
     const detail = document.createElement("small"); detail.textContent = `质量 ${index === 0 ? 8 : type.min} · ${type.radius}px`;
     caption.append(detail); label.append(input, caption); startTypes.append(label);
   }
+  // 存档使用独立计时器，主动暂停期间仍保存当前状态。
+  setInterval(savePlayer, 1000);
   resize(); openStartSelection(); requestAnimationFrame(frame);
 })();
