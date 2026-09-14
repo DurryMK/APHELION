@@ -1,0 +1,264 @@
+"use strict";
+
+globalThis.SolarLanguage = (() => {
+  const translations = {
+  "Space game: WASD thrust, K select satellite, L absorb, T jump, Space pause": "太空游戏：WASD 推进，K 选择卫星，L 吸收，T 跃迁，空格暂停",
+  "A thought from the cosmos": "宇宙随想",
+  "Body status": "天体状态",
+  "Mass": "质量",
+  "Speed": "速度",
+  "Satellites": "卫星",
+  "Distance": "距离",
+  "Time": "时间",
+  "Population": "人口",
+  "population": "人口",
+  "Tech": "科技",
+  "Shield": "护盾",
+  "City mass": "太空城质量",
+  "Kills": "击毁",
+  "Warning": "预警",
+  "Incubating life": "生命孕育中",
+  "Drift paused": "漂流暂停",
+  "Pause controls": "暂停操作",
+  "Resume": "继续",
+  "Space": "空格",
+  "Trail": "轨迹",
+  "New journey": "新的旅程",
+  "Drifting": "惯性漂流",
+  "Gravity reach": "引力范围",
+  "Capture reach": "捕获范围",
+  "K select satellite · L absorb": "K 选择卫星 · L 吸收",
+  "Zoom": "缩放",
+  "Your journey is saved every second.": "每秒自动记录你的旅程。",
+  "Your journey is safely recorded.": "你的旅程已妥善记录。",
+  "Quick guide": "操作说明",
+  "Celestial bodies": "天体图鉴",
+  "THE UNIVERSE REMEMBERS": "宇宙会记得",
+  "Back to stardust": "归于星尘",
+  "Begin again": "再次启程",
+  "CHOOSE YOUR ORIGIN": "选择你的起点",
+  "Choose your origin": "从哪颗星开始？",
+  "Choose a starting stage. Your civilization begins with new life.": "选择起始天体，文明从初生生命开始发展。",
+  "Starting body": "起始天体",
+  "Begin journey": "开始旅程",
+  "Continue · New sandbox": "继续旅程 · 新宇宙",
+  "WASD Thrust · K Select · L Absorb": "WASD 推进 · K 选择 · L 吸收",
+  "T Jump · Wheel Zoom · Space Pause · O Trail": "T 跃迁 · 滚轮缩放 · 空格暂停 · O 轨迹",
+  "Release WASD to coast; thrust backward to brake.": "松开 WASD 惯性滑行，反向推进制动。",
+  "Merge asteroids at low speed. As a planet, fly past asteroids to capture them; K selects, L or double-click absorbs.": "陨石低速碰撞成长；行星掠过陨石捕获，K 选择，L 或双击吸收。",
+  "Life and technology grow automatically. At tech 4, press T to jump: click to confirm, right-click / Esc to cancel.": "生命与科技自动发展。科技 4 级解锁 T 跃迁：左键确认，右键或 Esc 取消。",
+  "Avoid hostile fire and massive bodies. Autosaves keep your progress; loading creates a new universe.": "避开敌方火力与大质量天体。自动存档保留成长，读档进入新宇宙。",
+  "The nest has fallen silent": "巢穴已归于沉寂",
+  "Hostile fire detected": "遭遇敌方火力",
+  "A shield now shelters your world": "护盾开始守护你的世界",
+  "Your civilization has learned to defend itself": "你的文明学会了抵御外敌",
+  "Artificial moons take their first flight": "人造卫星首次升空",
+  "A city rises beyond the sky · Jump unlocked": "城市延伸至天外 · 跃迁已解锁",
+  "Your civilization has mastered stellar harvesting": "你的文明掌握了天体吞噬技术",
+  "Life has emerged on your world": "你的世界诞生了生命",
+  "A new chapter for your world": "你的世界翻开新篇章",
+  "A new sky awaits": "一片新的星空在等待",
+  "A powerful gravity well lies nearby": "附近发现强大引力源",
+  "Your journey continues beneath unfamiliar stars": "你的旅程在陌生星空下继续",
+  "Your world suffered critical damage.": "你的世界遭受了致命损伤。",
+  "You were absorbed by a larger body.": "你被更大的天体吸收了。",
+  "Peak mass": "最高质量",
+  "absorbed": "已吸收",
+  "bodies, drifted for": "颗天体，漂流",
+  "years, travelled": "年，累计距离",
+  "years": "年",
+  "km": "千米",
+  "Jump locked · Requires a space city": "跃迁尚未解锁 · 需要太空城",
+  "Jump locked · Requires a level 4 space city": "跃迁尚未解锁 · 需要 4 级文明太空城",
+  "Jump recharging": "跃迁充能中",
+  "Jump cooldown": "跃迁冷却",
+  "Jump obstructed · Choose open space": "跃迁受阻 · 请选择空旷地带",
+  "Jump ready · T select, click confirm, right-click / Esc cancel": "跃迁就绪 · T 选点，左键确认，右键或 Esc 取消",
+  "No save yet · Autosave starts with your journey.": "暂无存档 · 启程后自动保存。",
+  "Invalid save data.": "存档内容无效。",
+  "Unable to read save:": "无法读取存档：",
+  "Save failed:": "保存失败：",
+  "Thrust cap": "推进上限",
+  "Speed cap": "速度上限",
+  "Selected": "已选择",
+  "L absorb": "L 吸收",
+  "Signal lost": "信号消逝",
+  "Time paused": "时间已暂停",
+  "Thrusting · Release WASD to coast": "正在推进 · 松开 WASD 漂流",
+  "Drifting · WASD to thrust": "惯性漂流 · WASD 推进",
+  "Journey ended": "旅程结束",
+  "Gravity paused": "引力已暂停",
+  "Drifting among the stars": "在群星间漂流",
+  "Next stage:": "下一阶段：",
+  "Your world is fully grown · New mass expands the city": "你的世界已成长完全 · 新增质量用于扩建太空城",
+  "World integrity": "世界完整度",
+  "Keep above 50% to survive": "保持在 50% 以上以存活",
+  "Mothership": "母舰",
+  "Fighter": "攻击舰",
+  "Asteroid": "陨石",
+  "Planet": "行星",
+  "Room for": "可容纳",
+  "moons": "颗卫星",
+  "Natural body": "天然天体",
+  "Cannot be captured or destroyed": "无法捕获或摧毁",
+  "Tech cap": "科技上限",
+  "Satellite cap": "卫星上限",
+  "Merge asteroids": "融合陨石",
+  "Reach mass": "质量达到",
+  "to incubate life": "即可孕育生命",
+  "Life ready · Reach Luna": "孕育完成 · 等待皓月阶段",
+  "Life re-emerging": "生命重新孕育",
+  "Incubation": "孕育进度",
+  "Absorb asteroids to mass": "吸收陨石，将质量提升至",
+  "to unlock population capacity": "以解锁人口容量",
+  "Seeds": "诞生",
+  "needs population": "所需人口",
+  "Research": "研究",
+  "All technologies unlocked": "所有科技已解锁",
+  "Growing · Tech capped": "人口增长 · 科技达当前上限",
+  "Growing · Tech complete": "人口增长 · 科技完备",
+  "Research cap": "研究上限",
+  "Awaiting population": "等待人口增长",
+  "Research resumes at the population threshold": "人口达标后继续研究",
+  "Researching": "研究中",
+  "Dust": "星尘",
+  "Core": "星核",
+  "Luna": "皓月",
+  "Mars": "赤星",
+  "Terra": "大地",
+  "Gaia": "盖亚",
+  "Halo": "星环",
+  "Titan": "泰坦",
+  "Sol": "恒星",
+  "Pulsar": "脉冲星",
+  "Void": "虚空",
+  "The asteroid you just swallowed was their shooting star last night.": "你刚吞下的那颗陨石，是他们昨晚许愿的流星。",
+  "They called your last sharp turn the Great Migration.": "他们把这次急转弯叫作“大迁徙”。",
+  "After the first jump, every astronomer filed for retirement.": "第一次跃迁后，天文学家集体申请了退休。",
+  "The day the shield went up, the doomsayers started looking for other work.": "护盾建成那天，末日预言家开始寻找别的工作。",
+  "That moon kept them company for three centuries. You needed a little more mass.": "那颗卫星陪了他们三百年。你觉得还差一点质量。",
+  "The expensive apartments face the star. The cheap ones will shortly.": "太空城最贵的房子朝向恒星，最便宜的也快朝向恒星了。",
+  "They discovered the universe has no center. You remain in the middle of the screen.": "他们发现宇宙没有中心。你依然待在屏幕正中间。",
+  "You let go of the controls. They entered an age of peace.": "你松开了方向键。他们迎来了和平年代。",
+  "They spent centuries explaining your orbit. Let us hope they never discover WASD.": "他们花了几百年解释你的轨道。希望他们永远别发现 WASD。",
+  "Their oldest calendar is now a work of fiction.": "他们最古老的历法，如今被归入了小说。",
+  "The new moon has a name already. Please try not to eat this one.": "新月亮已经有名字了。这颗尽量别吃。",
+  "Somewhere down there, someone is blaming the weather.": "下面的某个地方，有人正在埋怨天气。",
+  "The ocean moved first. The maps followed reluctantly.": "海洋先搬了家，地图很不情愿地跟了过去。",
+  "Their first message to the stars was a complaint about the rent.": "他们发往群星的第一条消息，是抱怨房租太贵。",
+  "A child drew two moons today. By dinner, the drawing was out of date.": "今天有个孩子画了两个月亮。晚饭前，画就过时了。",
+  "The observatory has stopped printing next year's star charts.": "天文台已经不再印刷明年的星图。",
+  "They built a monument to the moon. The monument lasted longer.": "他们为月亮立了一座碑。碑留得更久。",
+  "Every crater has a story. Most begin with an apology.": "每个陨石坑都有故事。大多以一句道歉开头。",
+  "The first space tourist asked when the planet would stop moving.": "第一位太空游客问，这颗行星什么时候能停一下。",
+  "They named a constellation after you. You promptly left it behind.": "他们用你的名字命名了一个星座。你转眼就把它甩在身后。",
+  "The shield warranty does not cover black holes.": "护盾保修条款不包含黑洞。",
+  "Someone just opened a seaside cafe. You have one job.": "刚有人开了一家海边咖啡馆。你稍微开稳一点。",
+  "Their telescope found another civilization. Their laser found it too.": "望远镜发现了另一个文明。激光也发现了。",
+  "The city council approved another floor. Gravity approved all of them.": "市议会批准再盖一层。引力批准了所有楼层。",
+  "A billion people live here. None of them agreed on a name.": "这里住着十亿人。谁也没能说服谁该给这里起什么名字。",
+  "They finally reached the moon. You were browsing for another.": "他们终于登上了月亮。你正在物色下一颗。",
+  "The emergency siren is now the national anthem.": "紧急警报如今成了国歌。",
+  "Their philosophers call it fate. You call it a missed turn.": "哲学家称之为命运。你称之为转弯没转过来。",
+  "The stars look peaceful from a sufficiently small window.": "窗户足够小，星空看起来就很太平。",
+  "They packed for the end of the world. It turned out to be a short trip.": "他们为世界末日打好了行李。结果只是一次短途旅行。",
+  "Space — View controls": "空格键 — 查看操作说明",
+  "Dust merges on gentle contact. Planets grow by capturing and absorbing asteroids.": "星尘通过低速碰撞融合；行星通过捕获、吸收陨石成长。",
+  "More mass supports more life. Sol, Pulsar and Void are natural hazards.": "质量越大，能容纳的生命越多。恒星、脉冲星与虚空是天然危险天体。",
+  "Technology levels": "科技等级说明",
+  "Controls": "按键操作说明",
+  "Shield · Protects your world.": "护盾 · 抵御撞击与攻击。",
+  "Lasers · Defend against nearby enemies.": "激光 · 自动攻击附近敌人。",
+  "Artificial moons · Stronger, longer-range firepower.": "人造卫星 · 提升火力与射程。",
+  "Space city · More living space and spatial jumps.": "太空城 · 扩大人口容量，解锁跃迁。",
+  "Harvesting · Absorb half the remaining mass of planets destroyed by your lasers.": "吞噬 · 吸收被自身激光击碎行星剩余质量的一半。",
+  "Thrust; reverse to brake.": "推进，反向推进制动。",
+  "Select / absorb a captured moon.": "选择 / 吸收已捕获的卫星。",
+  "Double-click": "双击",
+  "Absorb a captured moon.": "吸收已捕获的卫星。",
+  "Choose a jump destination; click to confirm, right-click / Esc to cancel.": "选择跃迁位置，左键确认，右键或 Esc 取消。",
+  "Wheel / O": "滚轮 / O",
+  "Zoom / toggle trail.": "缩放 / 切换轨迹。",
+  "View guide / resume.": "查看说明 / 继续游戏。",
+  "Use Chinese": "使用中文",
+  "Keeping billions alive is easy. The hard part is not steering them into the sun.": "养活几十亿人不难，难的是别把他们开进太阳里。",
+  "Start as a rock. Grow until the people on it complain about housing prices.": "从一颗石头开始，直到上面的人开始抱怨房价。",
+  "You wander through space. They write history about every turn.": "你负责在宇宙里闲逛，他们负责给每次转弯编写历史。",
+  "Collect moons, nurture civilization, and occasionally inconvenience astronomers.": "收集月亮，培养文明，偶尔给天文学家添点麻烦。",
+  "Raise a rock into an entire world. Then figure out where to steer it.": "把一颗石头养成整个世界，然后想想该往哪儿开。",
+  "They search the stars for answers. You search for your next asteroid snack.": "他们仰望星空寻找答案，你正在找下一顿陨石。",
+  "A space-drifting game where the passengers multiply, but never buckle up.": "一款太空漂流游戏，乘客会自行繁衍，但不会系安全带。",
+  "There are no predetermined orbits here—just textbooks trying to keep up.": "这里没有预定的轨道，只有努力跟上你的教科书。",
+  "Flight controls": "飞行操作",
+  "Rotate your device to landscape.": "请将设备旋转至横屏。",
+  "Hold to thrust · Release to drift": "按住推进 · 松手滑行",
+  "Hold": "按住",
+  "Hold open space to thrust; release to drift.": "按住空旷处朝该方向推进，松手惯性滑行。",
+  "Double-tap": "双击",
+  "Pinch": "双指捏合",
+  "Zoom the view.": "缩放视野。",
+  "Jump": "跃迁",
+  "Tap Jump, then tap open space. Tap Jump again to cancel.": "点击跃迁，再点选空旷处；再次点击跃迁可取消。",
+  "Language": "语言",
+  "Language preference could not be saved.": "语言偏好无法保存。",
+  "s": "秒"
+};
+  translations.Danger = "危险";
+  translations.Nearby = "接近";
+  translations["Unable to read save. Check browser storage permissions."] = "无法读取存档，请检查浏览器存储权限。";
+  translations["Save failed. Check browser storage permissions and available space."] = "保存失败，请检查浏览器存储权限与剩余空间。";
+  const key = "aphelion-language";
+  let language = "en";
+  try { language = localStorage.getItem(key) === "zh" ? "zh" : "en"; }
+  catch { /* 浏览器禁止存储时，本次会话仍可选择语言。 */ }
+  const bindings = new Map();
+  const terms = Object.keys(translations).sort((a, b) => b.length - a.length);
+  const pattern = new RegExp("\\b(?:" + terms.map(term => term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|") + ")(?![A-Za-z])", "g");
+  function translate(source) {
+    return language === "en" ? source : source.replace(pattern, match => translations[match]);
+  }
+  function text(node, source) {
+    const value = String(source);
+    bindings.set(node, { source: value });
+    node.textContent = translate(value);
+  }
+  function attribute(node, name, source) {
+    node.dataset[name === "title" ? "englishTitle" : "englishAria"] = source;
+    node.setAttribute(name, translate(source));
+  }
+  function refresh() {
+    document.documentElement.lang = language === "en" ? "en" : "zh-CN";
+    for (const [node, binding] of bindings) {
+      if (!node.isConnected) { bindings.delete(node); continue; }
+      if (node.nodeType === Node.ELEMENT_NODE && node.firstChild?.nodeType === Node.TEXT_NODE) {
+        node.firstChild.textContent = translate(binding.source);
+      } else {
+        node.textContent = translate(binding.source);
+      }
+    }
+    for (const node of document.querySelectorAll("[data-english-title]")) node.title = translate(node.dataset.englishTitle);
+    for (const node of document.querySelectorAll("[data-english-aria]")) node.setAttribute("aria-label", translate(node.dataset.englishAria));
+    for (const control of document.querySelectorAll("[data-language]")) control.checked = language === "zh";
+  }
+  function initialize() {
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    const nodes = [];
+    while (walker.nextNode()) {
+      const node = walker.currentNode;
+      if (node.textContent.trim() && !["SCRIPT", "STYLE", "OPTION"].includes(node.parentElement.tagName)) nodes.push(node);
+    }
+    for (const node of nodes) text(node, node.textContent);
+    for (const node of document.querySelectorAll("[title], [aria-label]")) {
+      for (const name of ["title", "aria-label"]) if (node.hasAttribute(name)) attribute(node, name, node.getAttribute(name));
+    }
+    for (const control of document.querySelectorAll("[data-language]")) control.addEventListener("change", () => {
+      language = control.checked ? "zh" : "en";
+      refresh();
+      try { localStorage.setItem(key, language); }
+      catch { window.alert(translate("Language preference could not be saved.")); }
+    });
+    refresh();
+  }
+  initialize();
+  return { text, attribute, translate, forget: node => bindings.delete(node) };
+})();

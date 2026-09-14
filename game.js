@@ -3,7 +3,7 @@
 (() => {
   const canvas = document.getElementById("universe");
   const ctx = canvas.getContext("2d", { alpha: false });
-  const ui = Object.fromEntries(["stage", "stage-dot", "mass", "speed", "satellites", "next-stage", "progress-text", "progress", "drive-status", "world-status", "scale", "notice", "end-screen", "end-description", "help-panel", "pause", "orbits", "pause-screen"].map(id => [id, document.getElementById(id)]));
+  const ui = Object.fromEntries(["stage", "stage-dot", "mass", "speed", "satellites", "next-stage", "progress-text", "progress", "notice", "end-screen", "end-description", "pause", "pause-screen"].map(id => [id, document.getElementById(id)]));
   const CONFIG = SolarConfig, CIV = SolarCivilization, GRAVITY = SolarGravity;
   const TYPES = CONFIG.types;
   const STEP = CONFIG.physicsStep, WORLD_RADIUS = 1800;
@@ -21,9 +21,24 @@
   let time = 0, lastFrame = 0, accumulator = 0, nextPopulation = 0, nextHud = 0;
   let peakMass = 8, absorbed = 0, shake = 0, driftDistance = 0;
   let warningCache = { at: -Infinity, records: [] };
+  const discoveredHazards = new Set();
+  let lastAttackNotice = -Infinity;
   const camera = { x: 0, y: 0, zoom: 1, targetZoom: 1 };
   const thrust = { x: 0, y: 0, active: false };
   const movementKeys = new Set();
+  const touchPoints = new Map();
+  let drivePointer = null, pinchDistance = 0;
+  const touchLayout = matchMedia("(pointer: coarse)");
+  function updateTouchThrust() {
+    if (drivePointer === null || !player || paused || ended || choosingStart || jumping) return;
+    const point = touchPoints.get(drivePointer);
+    const dx = point.x - screenX(player.x), dy = point.y - screenY(player.y);
+    const length = Math.hypot(dx, dy);
+    thrust.active = length > 8;
+    thrust.x = thrust.active ? dx / length : 0;
+    thrust.y = thrust.active ? dy / length : 0;
+    warningCache.at = -Infinity;
+  }
   const movementCodes = new Set(["KeyW", "KeyA", "KeyS", "KeyD"]);
   function updateThrust() {
     warningCache.at = -Infinity;
@@ -35,7 +50,10 @@
     thrust.x = length > 0 ? x / length : 0;
     thrust.y = length > 0 ? y / length : 0;
   }
-  function clearMovement() { movementKeys.clear(); updateThrust(); }
+  function clearMovement() {
+    drivePointer = null; pinchDistance = 0; touchPoints.clear();
+    movementKeys.clear(); updateThrust();
+  }
   const random = (a, b) => a + Math.random() * (b - a);
   const clamp = (n, a, b) => Math.max(a, Math.min(b, n));
   const satelliteLimit = type => TYPES[type].natural || type === 0 ? 0 : Math.min(6, Math.max(2, TYPES[type].level + 1));
@@ -75,7 +93,11 @@
   }
 
   function announce(message) {
-    ui.notice.textContent = message;
+    const entry = document.createElement("div");
+    entry.className = "event-notice";
+    SolarLanguage.text(entry, message);
+    ui.notice.append(entry);
+    setTimeout(() => { SolarLanguage.forget(entry); entry.remove(); }, 2000);
   }
 
   function burst(x, y, color, count, strength = 25) {
@@ -165,11 +187,13 @@
     time = 0; accumulator = 0; lastFrame = 0; nextPopulation = 2; nextHud = 0; peakMass = startMass; absorbed = 0; shake = 0;
     driftDistance = 0;
     warningCache = { at: -Infinity, records: [] };
+    discoveredHazards.clear();
+    lastAttackNotice = -Infinity;
+    ui.notice.replaceChildren();
     if (snapshot) restorePlayer(snapshot);
     nextCivilization = time + CONFIG.civilization.tick; nextCombat = time + CONFIG.combat.tick;
     ui["end-screen"].hidden = true;
     ui["pause-screen"].close();
-    document.getElementById("save-status").textContent = "每秒自动保存 · 读档进入新沙盒。";
     // 出生点只保留两个疏松的小天体群，其他方向留出空白。
     const nearbyAngle = random(0, Math.PI * 2);
     for (let i = 0; i < POPULATION.nearby; i++) {
@@ -178,7 +202,7 @@
     }
     for (let i = 0; i < POPULATION.initial; i++) spawnAmbient(true);
     manageNests();
-    announce("按住 WASD 推进，松开后惯性滑行", 9);
+
     refreshHud();
   }
 
@@ -202,7 +226,7 @@
         occupied.set(host.id, occupied.get(host.id) + 1);
         continue;
       }
-      if (b.host === player.id) announce("卫星脱离 · 外部潮汐过强或超出维持条件", 2);
+
       b.host = null; b.orbitRadius = 0; b.captureAfter = time + 2;
     }
     for (const b of bodies) {
@@ -225,7 +249,7 @@
         occupied.set(candidate.id, occupied.get(candidate.id) + 1);
         b.orbitRadius = clamp(nearest, CAPTURE.minimumOrbitRadius, orbitRadiusLimit(candidate));
         b.orbitDirection = dx * (b.vy - candidate.vy) - dy * (b.vx - candidate.vx) < 0 ? -1 : 1;
-        if (candidate === player) { announce("捕获卫星 · 正在进入绕行轨道", 3); burst(b.x, b.y, TYPES[player.type].color, 8, 12); }
+        if (candidate === player) { burst(b.x, b.y, TYPES[player.type].color, 8, 12); }
       }
     }
   }
@@ -276,13 +300,17 @@
       attacker.kills[category]++;
       if (category === "mothership") CIV.research(attacker, CONFIG.civilization.mothershipResearchReward);
       if (cause === "laser" && wasPlanet && attacker.civ.tech === 5) gainMass(attacker, remainingMass * CONFIG.combat.devourFraction);
-      if (attacker === player) announce(`击毁${category === "mothership" ? "母舰" : category === "fighter" ? "攻击舰" : wasPlanet ? "行星" : "陨石"}${cause === "laser" && wasPlanet && attacker.civ.tech === 5 ? " · 吸收剩余质量的 50%" : ""}`);
+      if (attacker === player && category === "mothership") announce("The nest has fallen silent");
     }
-    if (target === player) die("天体损伤超过承受极限。");
+    if (target === player) die("Your world suffered critical damage.");
   }
 
   function damageUnit(target, amount, attacker, cause) {
     if (!target.alive || target.natural || amount <= 0) return;
+    if (target === player && cause === "laser" && time - target.civ.lastHit >= 5 && performance.now() - lastAttackNotice >= 12000) {
+      lastAttackNotice = performance.now();
+      announce("Hostile fire detected");
+    }
     if (target.entity) {
       target.hp -= amount;
       if (target.hp <= 0) destroyUnit(target, attacker, cause);
@@ -328,7 +356,9 @@
   function updateCivilizations(dt) {
     for (const body of bodies) {
       if (!body.alive || body.natural) continue;
-      if (CIV.tick(body, dt, time) && body === player) announce(`文明科技达到 ${body.civ.tech} 级`);
+      const hadLife = body.civ.population > 0;
+      if (CIV.tick(body, dt, time) && body === player) announce(["", "A shield now shelters your world", "Your civilization has learned to defend itself", "Artificial moons take their first flight", "A city rises beyond the sky · Jump unlocked", "Your civilization has mastered stellar harvesting"][body.civ.tech]);
+      if (body === player && !hadLife && body.civ.population > 0) announce("Life has emerged on your world");
       // 环境行星自主吸收已经捕获的陨石，玩家通过 K/L 决定吸收时机。
       if (body !== player && isPlanet(body) && time >= body.nextAbsorb) {
         body.nextAbsorb = time + random(8, 15);
@@ -450,17 +480,17 @@
       limitPlayerSpeed();
       absorbed++; peakMass = Math.max(peakMass, a.mass);
       if (a.type !== oldType) {
-        announce(`晋升为${TYPES[a.type].name} · ${oldType === 0 ? "从小天体侧面掠过，捕获卫星" : "引力正在增强"}`, 5);
+        announce(`${TYPES[a.type].name} · A new chapter for your world`);
         burst(a.x, a.y, TYPES[a.type].color, 60, 60);
       }
     }
-    if (b === player) die("你被一颗更大的天体吸收了。");
+    if (b === player) die("You were absorbed by a larger body.");
     return true;
   }
 
   function die(reason) {
     ended = true; jumping = false; clearMovement();
-    ui["end-description"].textContent = `${reason} 最高质量 ${peakMass.toFixed(1)}，吸收了 ${absorbed} 颗天体，漂流 ${Math.floor(time).toLocaleString()} 年，累计路程 ${Math.floor(driftDistance).toLocaleString()} km。`;
+    SolarLanguage.text(ui["end-description"], `${reason} Peak mass ${peakMass.toFixed(1)}, absorbed ${absorbed} bodies, drifted for ${Math.floor(time).toLocaleString()} years, travelled ${Math.floor(driftDistance).toLocaleString()} km.`);
     ui["end-screen"].hidden = false;
   }
 
@@ -513,7 +543,7 @@
     burst(a.x, a.y, "#f7cc9c", Math.min(25, Math.ceil(total)), 50);
     if (a === player || b === player) {
       shake = 4;
-      if (!ended) announce("发生碰撞 · 护盾优先承伤，无盾时损失质量与人口");
+
     }
   }
 
@@ -665,7 +695,7 @@
     }
     body.jumpReady = time + CONFIG.jump.cooldown;
     warningCache.at = -Infinity;
-    if (body === player) { jumping = false; announce("空间跃迁完成 · 卫星随行，保留惯性"); }
+    if (body === player) { jumping = false; announce("A new sky awaits"); }
     return true;
   }
 
@@ -675,11 +705,12 @@
 
   function toggleJump() {
     if (paused || ended || choosingStart) return;
+    clearMovement();
     if (jumping) { jumping = false; return; }
-    if (!player.civ.city || player.civ.tech < 4) { announce("4 级文明建成太空城后解锁跃迁"); return; }
-    if (time < player.jumpReady) { announce(`跃迁冷却 ${Math.ceil(player.jumpReady - time)} 秒`); return; }
+    if (!player.civ.city || player.civ.tech < 4) return;
+    if (time < player.jumpReady) return;
     jumping = true;
-    announce("选择可见空旷地带 · 左键跃迁 · 右键 / Esc 取消 · 时间继续流逝");
+
   }
 
   function playerSnapshot() {
@@ -716,13 +747,13 @@
     savedGame = null; load.disabled = true;
     try {
       const raw = localStorage.getItem(CONFIG.saveKey);
-      if (raw === null) { status.textContent = "暂无存档 · 开始后每秒自动保存。"; return; }
+      if (raw === null) { SolarLanguage.text(status, "No save yet · Autosave starts with your journey."); return; }
       const snapshot = JSON.parse(raw);
-      if (!validSnapshot(snapshot)) { status.textContent = "存档内容无效，无法读取。"; return; }
+      if (!validSnapshot(snapshot)) { SolarLanguage.text(status, "Invalid save data."); return; }
       savedGame = snapshot; load.disabled = false;
-      status.textContent = `${TYPES[typeOf(snapshot.mass)].name} · 科技 ${snapshot.civ.tech} · 人口 ${Math.floor(snapshot.civ.population).toLocaleString()} · ${new Date(snapshot.savedAt).toLocaleString()}`;
+      SolarLanguage.text(status, `${TYPES[typeOf(snapshot.mass)].name} · Tech ${snapshot.civ.tech} · population ${Math.floor(snapshot.civ.population).toLocaleString()} · ${new Date(snapshot.savedAt).toLocaleString()}`);
     } catch (error) {
-      status.textContent = `无法读取本地存档：${error.message}`;
+      SolarLanguage.text(status, "Unable to read save. Check browser storage permissions.");
     }
   }
 
@@ -730,9 +761,8 @@
     if (!player?.alive || ended || choosingStart) return;
     try {
       localStorage.setItem(CONFIG.saveKey, JSON.stringify(playerSnapshot()));
-      document.getElementById("save-status").textContent = "已自动保存 · 每秒更新。";
     } catch (error) {
-      document.getElementById("save-status").textContent = `保存失败：${error.message}`;
+      console.error("Autosave failed", error);
     }
   }
 
@@ -1050,43 +1080,36 @@
     if (choosingStart) return;
     const type = TYPES[player.type], c = player.civ, growth = CIV.progress(player);
     const percent = growth.total > 0 ? clamp(growth.value / growth.total * 100, 0, 100) : 0;
-    ui.stage.textContent = type.name; ui["stage-dot"].style.background = type.color; ui["stage-dot"].style.color = type.color;
-    ui.mass.textContent = player.mass.toFixed(1); ui.speed.textContent = Math.hypot(player.vx, player.vy).toFixed(1);
+    SolarLanguage.text(ui.stage, type.name); ui["stage-dot"].style.background = type.color; ui["stage-dot"].style.color = type.color;
+    SolarLanguage.text(ui.mass, player.mass.toFixed(1)); SolarLanguage.text(ui.speed, Math.hypot(player.vx, player.vy).toFixed(1));
     const format = n => Math.floor(n).toLocaleString();
-    document.getElementById("drift-distance").textContent = `${format(driftDistance)} km`;
-    document.getElementById("drift-time").textContent = `${format(time)} 年`;
+    SolarLanguage.text(document.getElementById("drift-distance"), `${format(driftDistance)} km`);
+    SolarLanguage.text(document.getElementById("drift-time"), `${format(time)} years`);
     const warnings = nearbyWarnings();
+    if (!choosingStart && !ended) {
+      for (const warning of warnings) {
+        if (discoveredHazards.has(warning.body.id)) continue;
+        discoveredHazards.add(warning.body.id);
+        announce(`A powerful gravity well lies nearby · ${TYPES[warning.body.type].name}`);
+      }
+    }
     document.getElementById("hazard-warning-row").hidden = warnings.length === 0;
-    document.getElementById("hazard-warning").textContent = warnings.map(w => `${w.imminent ? "危险" : "接近"} · ${TYPES[w.body.type].name} ${Math.floor(w.distance)}px`).join("；");
+    SolarLanguage.text(document.getElementById("hazard-warning"), warnings.map(w => `${w.imminent ? "Danger" : "Nearby"} · ${TYPES[w.body.type].name} ${Math.floor(w.distance)} km`).join("; "));
     document.getElementById("hazard-warning").style.color = warnings.some(w => w.imminent) ? "#ff6575" : "#ffc375";
-    document.getElementById("life-stat").textContent = `${format(c.population)} / ${format(CIV.capacity(player))}`;
-    document.getElementById("tech-stat").textContent = `${c.tech} 级`;
-    document.getElementById("shield-stat").textContent = `${c.shield.toFixed(1)} / ${CIV.stats(player).shield}`;
-    document.getElementById("city-stat").textContent = player.cityMass.toFixed(1);
+    SolarLanguage.text(document.getElementById("life-stat"), `${format(c.population)} / ${format(CIV.capacity(player))}`);
+    SolarLanguage.text(document.getElementById("tech-stat"), `${c.tech}`);
+    SolarLanguage.text(document.getElementById("shield-stat"), `${c.shield.toFixed(1)} / ${CIV.stats(player).shield}`);
+    SolarLanguage.text(document.getElementById("city-stat"), player.cityMass.toFixed(1));
     document.getElementById("city-row").hidden = player.cityMass <= 0 && !c.city;
     const totalKills = Object.values(player.kills).reduce((sum, n) => sum + n, 0);
-    document.getElementById("kills-stat").textContent = format(totalKills);
+    SolarLanguage.text(document.getElementById("kills-stat"), format(totalKills));
     const satellites = bodies.filter(b => b.alive && b.host === player.id);
-    ui.satellites.textContent = `${satellites.length}/${satelliteLimit(player.type)}`;
+    SolarLanguage.text(ui.satellites, `${satellites.length}/${satelliteLimit(player.type)}`);
     if (!satellites.some(b => b.id === selectedSatelliteId)) { selectedSatelliteId = null; satelliteClickAt = -Infinity; }
-    ui.speed.title = `推进上限 ${playerSpeedLimit(player.type)} · 总速度上限 ${GRAVITY.speedLimit(player)}`;
-    document.getElementById("gravity-status").textContent = `引力半径 ${GRAVITY.range(player).toFixed(1)}px · 捕获半径 ${GRAVITY.captureRange(player).toFixed(1)}px · 引力质量 ${bodyMass(player).toFixed(1)}`;
-    const selected = satellites.find(b => b.id === selectedSatelliteId);
-    document.getElementById("satellite-selection").textContent = selected
-      ? `选中 ${TYPES[selected.type].name} #${selected.id} · 质量 ${selected.mass.toFixed(1)} · L 吸收`
-      : "K 循环选择卫星 · L 吸收";
-    ui["next-stage"].textContent = growth.label;
-    ui["progress-text"].textContent = `${Math.floor(percent)}%`; ui.progress.style.width = `${percent}%`;
+    SolarLanguage.attribute(ui.speed, "title", `Thrust cap ${playerSpeedLimit(player.type)} · Speed cap ${GRAVITY.speedLimit(player)}`);
+    SolarLanguage.text(ui["next-stage"], growth.label);
+    SolarLanguage.text(ui["progress-text"], `${Math.floor(percent)}%`); ui.progress.style.width = `${percent}%`;
     ui.progress.style.background = type.color;
-    ui["drive-status"].textContent = ended ? "信号消逝" : paused ? "时间已暂停" : thrust.active ? "推进中 · 松开 WASD 停止推进" : "惯性滑行 · WASD 推进";
-    ui["world-status"].textContent = ended ? "旅程结束" : paused ? "引力场已暂停" : `引力场运行中 · ${bodies.length} 颗天体`;
-    ui.scale.textContent = `${camera.zoom.toFixed(2)}×`;
-    const nextType = player.type < 7 ? TYPES[player.type + 1] : null;
-    document.getElementById("mass-status").textContent = nextType ? `下一质量档：${nextType.name} · ${nextType.min}` : `本体上限 ${CONFIG.maxPlanetMass} · 超额质量进入太空城`;
-    document.getElementById("civilization-status").textContent = growth.detail;
-    document.getElementById("jump-status").textContent = c.tech < 4 ? "跃迁尚未解锁 · 需要 4 级文明太空城" : time < player.jumpReady ? `跃迁冷却 ${Math.ceil(player.jumpReady - time)} 秒` : "跃迁就绪 · T 选点，左键确认，右键 / Esc 取消";
-    document.getElementById("damage-status").textContent = `结构质量 ${bodyMass(player).toFixed(1)} / 健康峰值 ${player.healthyMass.toFixed(1)} · 损失超过 50% 破碎`;
-    document.getElementById("kills-status").textContent = `击毁：母舰 ${player.kills.mothership} · 攻击舰 ${player.kills.fighter} · 陨石 ${player.kills.asteroid} · 行星 ${player.kills.planet}`;
   }
 
   function togglePause() {
@@ -1096,12 +1119,12 @@
     else { ui["pause-screen"].close(); ui.pause.blur(); }
     refreshHud();
   }
-  function toggleOrbits() { showTrails = !showTrails; ui.orbits.setAttribute("aria-pressed", String(showTrails)); }
+  function toggleOrbits() { showTrails = !showTrails; }
   function cycleSatellite() {
     if (choosingStart || ended) return;
     const satellites = bodies.filter(b => b.alive && b.host === player.id).sort((a, b) => a.id - b.id);
     satelliteClickAt = -Infinity;
-    if (satellites.length === 0) { selectedSatelliteId = null; announce("当前没有可选择的卫星", 2); refreshHud(); return; }
+    if (satellites.length === 0) { selectedSatelliteId = null; refreshHud(); return; }
     const index = satellites.findIndex(b => b.id === selectedSatelliteId);
     selectedSatelliteId = satellites[(index + 1) % satellites.length].id;
     refreshHud();
@@ -1109,28 +1132,37 @@
   function absorbSelectedSatellite() {
     if (choosingStart || ended || paused) return;
     const satellite = bodies.find(b => b.alive && b.host === player.id && b.id === selectedSatelliteId);
-    if (!satellite) { announce("先按 K 选择自己的卫星", 2); return; }
-    const gain = satellite.mass, oldType = player.type;
-    if (!absorb(player, satellite)) { announce("目标已不满足场内吸收条件", 2); return; }
+    if (!satellite || !absorb(player, satellite)) return;
     bodies = bodies.filter(b => b.alive);
     selectedSatelliteId = null; satelliteClickAt = -Infinity;
-    announce(`吸收卫星 · 质量 +${gain.toFixed(1)}${player.type !== oldType ? ` · 晋升为${TYPES[player.type].name}` : ""}`, 3);
+
     refreshHud();
   }
   canvas.addEventListener("pointerdown", event => {
     pointer = { x: event.clientX, y: event.clientY };
     if (event.button === 2) { jumping = false; return; }
     if (event.button !== 0 || ended || paused || choosingStart) return;
+    if (event.pointerType === "touch") {
+      event.preventDefault();
+      canvas.setPointerCapture(event.pointerId);
+      touchPoints.set(event.pointerId, { ...pointer });
+      if (touchPoints.size > 1) {
+        drivePointer = null; updateThrust(); satelliteClickAt = -Infinity;
+        const [a, b] = [...touchPoints.values()];
+        pinchDistance = Math.hypot(a.x - b.x, a.y - b.y);
+        return;
+      }
+    }
     if (jumping) {
       const target = jumpTarget();
-      if (!performJump(player, target.x, target.y)) announce("此处无法跃迁，请选择空旷位置并确认太空城仍在运行");
+      performJump(player, target.x, target.y);
       refreshHud(); return;
     }
     let satellite = null, nearest = Infinity;
     for (const b of bodies) {
       if (!b.alive || b.host !== player.id) continue;
       const distance = Math.hypot(event.clientX - screenX(b.x), event.clientY - screenY(b.y));
-      if (distance <= Math.max(12, b.radius * camera.zoom + 5) && distance < nearest) { satellite = b; nearest = distance; }
+      if (distance <= Math.max(event.pointerType === "touch" ? 24 : 12, b.radius * camera.zoom + 5) && distance < nearest) { satellite = b; nearest = distance; }
     }
     // 两次点击须命中同一颗卫星，卫星点击不改变推进方向。
     if (satellite) {
@@ -1141,16 +1173,41 @@
       return;
     }
     satelliteClickAt = -Infinity;
+    if (event.pointerType === "touch") {
+      drivePointer = event.pointerId;
+      updateTouchThrust();
+    }
   });
-  canvas.addEventListener("pointermove", event => { pointer = { x: event.clientX, y: event.clientY }; });
+  canvas.addEventListener("pointermove", event => {
+    pointer = { x: event.clientX, y: event.clientY };
+    if (!touchPoints.has(event.pointerId)) return;
+    touchPoints.set(event.pointerId, { ...pointer });
+    if (touchPoints.size > 1) {
+      const [a, b] = [...touchPoints.values()];
+      const distance = Math.hypot(a.x - b.x, a.y - b.y);
+      if (pinchDistance > 0) camera.targetZoom = clamp(camera.targetZoom * distance / pinchDistance, .5, 2.5);
+      pinchDistance = distance;
+    } else updateTouchThrust();
+  });
+  function releaseTouch(event) {
+    touchPoints.delete(event.pointerId);
+    if (drivePointer === event.pointerId) { drivePointer = null; updateThrust(); }
+    if (touchPoints.size < 2) pinchDistance = 0;
+  }
+  canvas.addEventListener("pointerup", releaseTouch);
+  canvas.addEventListener("pointercancel", releaseTouch);
+  canvas.addEventListener("lostpointercapture", releaseTouch);
   canvas.addEventListener("contextmenu", event => { event.preventDefault(); jumping = false; });
   canvas.addEventListener("wheel", event => { event.preventDefault(); camera.targetZoom = clamp(camera.targetZoom * Math.exp(-event.deltaY * .001), .5, 2.5); }, { passive: false });
-  ui.pause.addEventListener("click", togglePause); ui.orbits.addEventListener("click", toggleOrbits);
+  ui.pause.addEventListener("click", togglePause);
+  document.getElementById("touch-pause").addEventListener("click", togglePause);
+  document.getElementById("touch-jump").addEventListener("click", toggleJump);
+  document.getElementById("touch-trail").addEventListener("click", toggleOrbits);
   document.getElementById("load-save").addEventListener("click", () => {
     readSave();
     if (!savedGame) return;
     startScreen.close(); reset(typeOf(savedGame.mass), savedGame);
-    announce("存档已载入 · 新的宇宙，保留质量、文明、受损程度与击毁计数");
+    announce("Your journey continues beneath unfamiliar stars");
   });
   ui["pause-screen"].addEventListener("cancel", event => { event.preventDefault(); if (paused) togglePause(); });
   const startScreen = document.getElementById("start-screen");
@@ -1159,13 +1216,13 @@
   function updateStartSummary() {
     const index = Number(startForm.elements.namedItem("start-type").value);
     const type = TYPES[index];
-    document.getElementById("start-summary").textContent = `${type.name} · 初始质量 ${index === 0 ? 8 : type.min} · 基础半径 ${type.radius}px · 卫星上限 ${satelliteLimit(index)} · 推进上限 ${playerSpeedLimit(index)} · 总限 ${playerSpeedLimit(index) * CONFIG.gravity.playerSpeedMultiplier} · 引力半径 ${(type.gravityRange * CONFIG.gravity.playerRangeScale).toFixed(1)}px。`;
+    SolarLanguage.text(document.getElementById("start-summary"), `${type.name} · Mass ${index === 0 ? 8 : type.min} · Room for ${satelliteLimit(index)} moons`);
   }
   function openStartSelection() {
     choosingStart = true; accumulator = 0; jumping = false; clearMovement();
     ui["end-screen"].hidden = true;
     selectedSatelliteId = null; satelliteClickAt = -Infinity;
-    ui["pause-screen"].close(); ui["help-panel"].open = false;
+    ui["pause-screen"].close();
     readSave(); updateStartSummary(); startScreen.showModal();
   }
   document.getElementById("restart").addEventListener("click", openStartSelection);
@@ -1201,12 +1258,18 @@
   });
   window.addEventListener("blur", clearMovement);
   document.addEventListener("visibilitychange", () => { lastFrame = 0; accumulator = 0; });
-  window.addEventListener("resize", resize);
+  window.addEventListener("resize", () => { clearMovement(); resize(); });
 
   function frame(timestamp) {
     const dt = lastFrame ? Math.min((timestamp - lastFrame) / 1000, .06) : 0;
     lastFrame = timestamp;
+    document.getElementById("touch-actions").hidden = choosingStart || ended || paused;
+    document.getElementById("touch-jump").disabled = !player || !player.civ.city || player.civ.tech < 4 || time < player.jumpReady;
+    document.getElementById("touch-jump").setAttribute("aria-pressed", String(jumping));
+    document.getElementById("touch-trail").setAttribute("aria-pressed", String(showTrails));
+    document.getElementById("rotate-hint").hidden = !touchLayout.matches || width >= height;
     if (!choosingStart && !paused && !ended) {
+      updateTouchThrust();
       accumulator += dt;
       while (accumulator >= STEP && !ended) { step(STEP); accumulator -= STEP; }
       const follow = 1 - Math.exp(-dt * 3);
@@ -1223,8 +1286,8 @@
   for (const type of TYPES) {
     const entry = document.createElement("span");
     entry.style.setProperty("--color", type.color);
-    entry.textContent = `${type.name} ${type.radius}px`;
-    entry.title = `${type.natural ? `天然天体 · 质量 ${type.mass} · 无法捕获或击毁` : `质量 ≥ ${type.min} · 科技上限 ${type.techCap} · 卫星上限 ${satelliteLimit(TYPES.indexOf(type))}`} · 基础引力半径 ${type.gravityRange}px · 吸力由实际质量决定`;
+    SolarLanguage.text(entry, type.name);
+    SolarLanguage.attribute(entry, "title", `${type.natural ? `Natural body · Mass ${type.mass} · Cannot be captured or destroyed` : `Mass ≥ ${type.min} · Tech cap ${type.techCap} · Satellite cap ${satelliteLimit(TYPES.indexOf(type))}`} · Gravity reach ${type.gravityRange} km`);
     legend.append(entry);
     if (type.natural) continue;
     const index = TYPES.indexOf(type);
@@ -1232,10 +1295,63 @@
     label.className = "start-option"; label.style.setProperty("--color", type.color);
     const input = document.createElement("input");
     input.type = "radio"; input.name = "start-type"; input.value = String(index); input.checked = index === 0;
-    const caption = document.createElement("span"); caption.textContent = type.name;
-    const detail = document.createElement("small"); detail.textContent = `质量 ${index === 0 ? 8 : type.min} · ${type.radius}px`;
+    const caption = document.createElement("span"); SolarLanguage.text(caption, type.name);
+    const detail = document.createElement("small"); SolarLanguage.text(detail, `Mass ${index === 0 ? 8 : type.min}`);
     caption.append(detail); label.append(input, caption); startTypes.append(label);
   }
+  const flavorLines = [
+    "The asteroid you just swallowed was their shooting star last night.",
+    "They called your last sharp turn the Great Migration.",
+    "After the first jump, every astronomer filed for retirement.",
+    "The day the shield went up, the doomsayers started looking for other work.",
+    "That moon kept them company for three centuries. You needed a little more mass.",
+    "The expensive apartments face the star. The cheap ones will shortly.",
+    "They discovered the universe has no center. You remain in the middle of the screen.",
+    "You let go of the controls. They entered an age of peace.",
+    "They spent centuries explaining your orbit. Let us hope they never discover WASD.",
+    "Their oldest calendar is now a work of fiction.",
+    "The new moon has a name already. Please try not to eat this one.",
+    "Somewhere down there, someone is blaming the weather.",
+    "The ocean moved first. The maps followed reluctantly.",
+    "Their first message to the stars was a complaint about the rent.",
+    "A child drew two moons today. By dinner, the drawing was out of date.",
+    "The observatory has stopped printing next year's star charts.",
+    "They built a monument to the moon. The monument lasted longer.",
+    "Every crater has a story. Most begin with an apology.",
+    "The first space tourist asked when the planet would stop moving.",
+    "They named a constellation after you. You promptly left it behind.",
+    "The shield warranty does not cover black holes.",
+    "Someone just opened a seaside cafe. You have one job.",
+    "Their telescope found another civilization. Their laser found it too.",
+    "The city council approved another floor. Gravity approved all of them.",
+    "A billion people live here. None of them agreed on a name.",
+    "They finally reached the moon. You were browsing for another.",
+    "The emergency siren is now the national anthem.",
+    "Their philosophers call it fate. You call it a missed turn.",
+    "The stars look peaceful from a sufficiently small window.",
+    "They packed for the end of the world. It turned out to be a short trip.",
+    "Keeping billions alive is easy. The hard part is not steering them into the sun.",
+    "Start as a rock. Grow until the people on it complain about housing prices.",
+    "You wander through space. They write history about every turn.",
+    "Collect moons, nurture civilization, and occasionally inconvenience astronomers.",
+    "Raise a rock into an entire world. Then figure out where to steer it.",
+    "They search the stars for answers. You search for your next asteroid snack.",
+    "A space-drifting game where the passengers multiply, but never buckle up.",
+    "There are no predetermined orbits here—just textbooks trying to keep up."
+  ];
+  const flavorText = document.getElementById("flavor-text");
+  let flavorIndex = Math.floor(Math.random() * flavorLines.length);
+  SolarLanguage.text(flavorText, flavorLines[flavorIndex]);
+  setInterval(() => {
+    flavorText.classList.add("fading");
+    setTimeout(() => {
+      // 从其余文案中等概率选择，避免连续重复。
+      flavorIndex = (flavorIndex + 1 + Math.floor(Math.random() * (flavorLines.length - 1))) % flavorLines.length;
+      SolarLanguage.text(flavorText, flavorLines[flavorIndex]);
+      flavorText.classList.remove("fading");
+    }, 800);
+  }, 20000);
+
   // 存档使用独立计时器，主动暂停期间仍保存当前状态。
   setInterval(savePlayer, 1000);
   resize(); openStartSelection(); requestAnimationFrame(frame);

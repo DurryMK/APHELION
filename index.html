@@ -1,73 +1,97 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#050911">
   <title>APHELION</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <canvas id="universe" aria-label="太空游戏，WASD 推进，K 选择卫星，L 吸收，T 跃迁，空格暂停"></canvas>
+  <canvas id="universe" aria-label="Space game: WASD thrust, K select satellite, L absorb, T jump, Space pause"></canvas>
+  <div id="notice" role="status" aria-live="polite"></div>
+  <nav id="touch-actions" aria-label="Flight controls" hidden>
+    <button id="touch-trail" type="button" aria-pressed="true">Trail</button>
+    <button id="touch-jump" type="button" aria-pressed="false">Jump</button>
+    <button id="touch-pause" type="button">Quick guide</button>
+  </nav>
+  <div id="rotate-hint" hidden>Rotate your device to landscape.</div>
+  <p id="controls-hint"><span class="keyboard-only">Space — View controls</span><span class="touch-only">Hold to thrust · Release to drift</span></p>
+  <aside id="flavor-text" aria-label="A thought from the cosmos"></aside>
   <header class="brand"><span class="brand-mark">✳</span><div class="english">APHELION</div></header>
-  <section class="telemetry" aria-label="天体状态">
+  <section class="telemetry" aria-label="Body status">
     <div class="stage-line"><span id="stage-dot"></span><h1 id="stage">Dust</h1></div>
-    <div class="stats"><div><label>质量</label><strong id="mass">8.0</strong></div><div><label>速度</label><strong id="speed">0.0</strong></div><div><label>卫星</label><strong id="satellites">0</strong></div></div>
+    <div class="stats"><div><label>Mass</label><strong id="mass">8.0</strong></div><div><label>Speed</label><strong id="speed">0.0</strong></div><div><label>Satellites</label><strong id="satellites">0</strong></div></div>
     <dl class="civilization-stats">
-      <div><dt>漂流距离</dt><dd id="drift-distance">0 km</dd></div>
-      <div><dt>漂流时间</dt><dd id="drift-time">0 年</dd></div>
-      <div><dt>人口</dt><dd id="life-stat">0 / 0</dd></div>
-      <div><dt>科技</dt><dd id="tech-stat">0 级</dd></div>
-      <div><dt>护盾</dt><dd id="shield-stat">0 / 0</dd></div>
-      <div id="city-row" hidden><dt>太空城质量</dt><dd id="city-stat">0</dd></div>
-      <div><dt>击毁</dt><dd id="kills-stat">0</dd></div>
-      <div id="hazard-warning-row" hidden><dt>预警</dt><dd id="hazard-warning"></dd></div>
+      <div><dt>Distance</dt><dd id="drift-distance">0 km</dd></div>
+      <div><dt>Time</dt><dd id="drift-time">0 years</dd></div>
+      <div><dt>Population</dt><dd id="life-stat">0 / 0</dd></div>
+      <div><dt>Tech</dt><dd id="tech-stat">0</dd></div>
+      <div><dt>Shield</dt><dd id="shield-stat">0 / 0</dd></div>
+      <div id="city-row" hidden><dt>City mass</dt><dd id="city-stat">0</dd></div>
+      <div><dt>Kills</dt><dd id="kills-stat">0</dd></div>
+      <div id="hazard-warning-row" hidden><dt>Warning</dt><dd id="hazard-warning"></dd></div>
     </dl>
-    <div class="progress-label"><span id="next-stage">生命孕育中</span><span id="progress-text">0%</span></div>
+    <div class="progress-label"><span id="next-stage">Incubating life</span><span id="progress-text">0%</span></div>
     <div class="progress-track"><i id="progress"></i></div>
   </section>
   <dialog id="pause-screen" aria-labelledby="pause-title">
-    <h2 id="pause-title">漂流暂停</h2>
-    <p class="pause-shortcuts">WASD 推进 · K 选卫星 · L 吸收 · T 跃迁 · 滚轮缩放</p>
-    <nav class="pause-actions" aria-label="暂停控制">
-      <button id="pause" type="button">继续 <kbd>空格</kbd></button>
-      <button id="orbits" type="button" aria-pressed="true">玩家轨迹 <kbd>O</kbd></button>
-      <button id="new-game" type="button">返回起点</button>
-    </nav>
-    <div class="pause-info">
-      <p id="drive-status">惯性滑行</p>
-      <p id="gravity-status">引力半径 40px · 强度 2</p>
-      <p id="mass-status"></p>
-      <p id="civilization-status"></p>
-      <p id="damage-status"></p>
-      <p id="jump-status"></p>
-      <p id="kills-status"></p>
-      <p id="satellite-selection">K 循环选择卫星 · L 吸收</p>
-      <p><span id="world-status"></span> · 缩放 <span id="scale">1.00×</span></p>
-      <p id="notice" role="status"></p>
-      <p id="save-status" role="status">每秒自动保存 · 读档进入新沙盒。</p>
-    </div>
-    <details id="help-panel">
-      <summary>玩法速览</summary>
-      <p>松开 WASD 惯性滑行，反向推进制动。</p>
-      <p>陨石低速碰撞成长；行星中速掠过陨石捕获，K 选择、L 吸收，也可双击卫星吸收。</p>
-      <p>人口与科技自动发展。4 级解锁 T 跃迁：左键确认，右键 / Esc 取消。</p>
-      <p>避开敌方火力与危险天体。读档保留自身成长，不保留位置与卫星。</p>
-      <div id="type-legend" class="legend" aria-label="天体图例"></div>
-    </details>
+    <h2 id="pause-title">Quick guide</h2>
+    <p class="portrait-note">Rotate your device to landscape.</p>
+    <section class="guide-section">
+      <h3>Celestial bodies</h3>
+      <p>Dust merges on gentle contact. Planets grow by capturing and absorbing asteroids.</p>
+      <p>More mass supports more life. Sol, Pulsar and Void are natural hazards.</p>
+      <div id="type-legend" class="legend" aria-label="Celestial bodies"></div>
+    </section>
+    <section class="guide-section">
+      <h3>Technology levels</h3>
+      <ol class="tech-guide">
+        <li>Shield · Protects your world.</li>
+        <li>Lasers · Defend against nearby enemies.</li>
+        <li>Artificial moons · Stronger, longer-range firepower.</li>
+        <li>Space city · More living space and spatial jumps.</li>
+        <li>Harvesting · Absorb half the remaining mass of planets destroyed by your lasers.</li>
+      </ol>
+    </section>
+    <section class="guide-section">
+      <h3>Controls</h3>
+      <dl class="control-guide">
+        <dt class="touch-only">Hold</dt><dd class="touch-only">Hold open space to thrust; release to drift.</dd>
+        <dt class="touch-only">Double-tap</dt><dd class="touch-only">Absorb a captured moon.</dd>
+        <dt class="touch-only">Pinch</dt><dd class="touch-only">Zoom the view.</dd>
+        <dt class="touch-only">Jump</dt><dd class="touch-only">Tap Jump, then tap open space. Tap Jump again to cancel.</dd>
+        <dt class="keyboard-only">WASD</dt><dd class="keyboard-only">Thrust; reverse to brake.</dd>
+        <dt class="keyboard-only">K / L</dt><dd class="keyboard-only">Select / absorb a captured moon.</dd>
+        <dt class="keyboard-only">Double-click</dt><dd class="keyboard-only">Absorb a captured moon.</dd>
+        <dt class="keyboard-only">T</dt><dd class="keyboard-only">Choose a jump destination; click to confirm, right-click / Esc to cancel.</dd>
+        <dt class="keyboard-only">Wheel / O</dt><dd class="keyboard-only">Zoom / toggle trail.</dd>
+        <dt class="keyboard-only">Space</dt><dd class="keyboard-only">View guide / resume.</dd>
+      </dl>
+    </section>
+    <footer class="guide-footer">
+      <label class="language-choice"><span lang="en">English</span><input class="language-switch" type="checkbox" role="switch" data-language aria-label="Use Chinese"><span lang="zh-CN">中文</span></label>
+      <nav class="pause-actions" aria-label="Pause controls">
+        <button id="pause" type="button">Resume <kbd>Space</kbd></button>
+        <button id="new-game" type="button">New journey</button>
+      </nav>
+    </footer>
   </dialog>
-  <div id="end-screen" class="overlay" hidden><div class="end-card"><div class="eyebrow">THE UNIVERSE REMEMBERS</div><h2>归于星尘</h2><p id="end-description"></p><button id="restart">再点亮一颗星 <span>↗</span></button></div></div>
+  <div id="end-screen" class="overlay" hidden><div class="end-card"><div class="eyebrow">THE UNIVERSE REMEMBERS</div><h2>Back to stardust</h2><p id="end-description"></p><button id="restart">Begin again <span>↗</span></button></div></div>
   <dialog id="start-screen" aria-labelledby="start-title">
     <form id="start-form">
+      <label class="language-choice"><span lang="en">English</span><input class="language-switch" type="checkbox" role="switch" data-language aria-label="Use Chinese"><span lang="zh-CN">中文</span></label>
       <div class="eyebrow">CHOOSE YOUR ORIGIN</div>
-      <h2 id="start-title">从哪颗星开始？</h2>
-      <p>选择起始质量档位，文明从初生阶段发展。WASD 移动，空格暂停查看操作。</p>
-      <fieldset id="start-types"><legend>起始天体</legend></fieldset>
+      <h2 id="start-title">Choose your origin</h2>
+      <p class="portrait-note">Rotate your device to landscape.</p>
+      <p>Choose a starting stage. Your civilization begins with new life.</p>
+      <fieldset id="start-types"><legend>Starting body</legend></fieldset>
       <p id="start-summary" aria-live="polite"></p>
-      <button class="start-button" type="submit">开始旅程 ↗</button>
-      <div class="save-entry"><button id="load-save" type="button" disabled>载入文明 · 新沙盒</button><p id="save-summary" role="status"></p></div>
+      <button class="start-button" type="submit">Begin journey ↗</button>
+      <div class="save-entry"><button id="load-save" type="button" disabled>Continue · New sandbox</button><p id="save-summary" role="status"></p></div>
     </form>
   </dialog>
+  <script src="language.js"></script>
   <script src="config.js"></script>
   <script src="civilization.js"></script>
   <script src="gravity.js"></script>

@@ -106,28 +106,28 @@ globalThis.SolarCivilization = (() => {
     const c = body.civ, format = n => Math.floor(n).toLocaleString();
     if (stage(body).level < 0) {
       const threshold = SolarConfig.types.find(t => t.level === 0).min;
-      return { label: "合并陨石 · 形成行星", value: body.mass, total: threshold, detail: `质量达到 ${threshold} 后开始孕育生命` };
+      return { label: "Merge asteroids", value: body.mass, total: threshold, detail: `Reach mass ${threshold} to incubate life` };
     }
     if (c.population === 0) {
       const duration = incubationDuration(body), complete = c.incubation >= duration;
       const first = SolarConfig.types.find(t => t.level === 1);
       return {
-        label: complete && !eligible(body) ? "孕育完成 · 等待 1 档" : c.extinct ? "生命重新孕育" : "生命孕育中",
+        label: complete && !eligible(body) ? "Life ready · Reach Luna" : c.extinct ? "Life re-emerging" : "Incubating life",
         value: Math.min(c.incubation, duration), total: duration,
-        detail: `孕育 ${Math.min(c.incubation, duration).toFixed(1)} / ${duration} 秒${!eligible(body) ? ` · 吸收陨石至质量 ${first.min}，进入 1 档后获得人口容量` : ` · 完成后产生 ${config.seedPopulation} 人口`}`
+        detail: `Incubation ${Math.min(c.incubation, duration).toFixed(1)} / ${duration} s${!eligible(body) ? ` · Absorb asteroids to mass ${first.min} to unlock population capacity` : ` · Seeds ${config.seedPopulation} population`}`
       };
     }
     const cap = capacity(body), ceiling = technologyCap(body), next = config.technology[c.tech + 1];
-    const researchDetail = next ? `科技 ${c.tech + 1} 需人口 ${format(next.population)} · 研究 ${c.research.toFixed(1)} / ${next.research} 秒` : "5 级科技已全部掌握";
+    const researchDetail = next ? `Tech ${c.tech + 1} needs population ${format(next.population)} · Research ${c.research.toFixed(1)} / ${next.research} s` : "All technologies unlocked";
     if (!next || c.tech >= ceiling) return {
-      label: next ? "人口增长 · 科技达当前上限" : "人口增长 · 科技完备", value: c.population, total: cap,
-      detail: `人口 ${format(c.population)} / ${format(cap)} · 当前可研究上限 ${ceiling} 级 · ${researchDetail}`
+      label: next ? "Growing · Tech capped" : "Growing · Tech complete", value: c.population, total: cap,
+      detail: `Population ${format(c.population)} / ${format(cap)} · Research cap ${ceiling} · ${researchDetail}`
     };
     if (c.population < next.population) return {
-      label: `科技 ${c.tech + 1} · 等待人口`, value: c.population, total: next.population,
-      detail: `${researchDetail} · 人口达标前保留已有研究进度`
+      label: `Tech ${c.tech + 1} · Awaiting population`, value: c.population, total: next.population,
+      detail: `${researchDetail} · Research resumes at the population threshold`
     };
-    return { label: `科技 ${c.tech + 1} · 研究中`, value: c.research, total: next.research, detail: researchDetail };
+    return { label: `Tech ${c.tech + 1} · Researching`, value: c.research, total: next.research, detail: researchDetail };
   }
   return { create, capacity, stats, sync, research, tick, suffer, eligible, technologyCap, progress };
 })();
