@@ -4,35 +4,98 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#050911">
-  <title>微光 · SOLAR</title>
+  <title>APHELION</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <canvas id="universe" aria-label="太空游戏，左键点击设定推进方向，点击自己的天体停止推进"></canvas>
-  <header class="brand"><span class="brand-mark">✳</span><div>微光 <span class="english">/ SOLAR</span><small>一粒尘埃，也有自己的宇宙。</small></div></header>
+  <canvas id="universe" aria-label="太空游戏，WASD 推进，K 选择卫星，L 吸收，T 跃迁，空格暂停"></canvas>
+  <header class="brand"><span class="brand-mark">✳</span><div class="english">APHELION</div></header>
   <section class="telemetry" aria-label="天体状态">
-    <div class="eyebrow">YOUR CELESTIAL BODY</div>
-    <div class="stage-line"><span id="stage-dot"></span><h1 id="stage">小行星</h1><span id="stage-size">2 PX</span></div>
+    <div class="stage-line"><span id="stage-dot"></span><h1 id="stage">小行星</h1></div>
     <div class="stats"><div><label>质量</label><strong id="mass">8.0</strong></div><div><label>速度</label><strong id="speed">0.0</strong></div><div><label>卫星</label><strong id="satellites">0</strong></div></div>
-    <div class="progress-label"><span id="next-stage">下一阶段 · 岩质行星</span><span id="progress-text">0%</span></div>
+    <dl class="civilization-stats">
+      <div><dt>漂流距离</dt><dd id="drift-distance">0 km</dd></div>
+      <div><dt>漂流时间</dt><dd id="drift-time">0 年</dd></div>
+      <div><dt>人口</dt><dd id="life-stat">0 / 0</dd></div>
+      <div><dt>科技</dt><dd id="tech-stat">0 级</dd></div>
+      <div><dt>护盾</dt><dd id="shield-stat">0 / 0</dd></div>
+      <div id="city-row" hidden><dt>太空城质量</dt><dd id="city-stat">0</dd></div>
+      <div><dt>击毁</dt><dd id="kills-stat">0</dd></div>
+      <div id="hazard-warning-row" hidden><dt>预警</dt><dd id="hazard-warning"></dd></div>
+    </dl>
+    <div class="progress-label"><span id="next-stage">生命孕育中</span><span id="progress-text">0%</span></div>
     <div class="progress-track"><i id="progress"></i></div>
-    <p id="drive-status">惯性滑行</p>
   </section>
-  <nav class="controls" aria-label="游戏控制"><button id="orbits" aria-pressed="true">轨迹 <kbd>O</kbd></button><button id="pause" aria-pressed="false">暂停 <kbd>空格</kbd></button><button id="help" aria-expanded="false">操作 <kbd>?</kbd></button></nav>
-  <aside id="help-panel" hidden>
-    <h2>在引力中航行</h2>
-    <p>左键点击：向该方向持续推进。</p>
-    <p>点击自身的圆环：关闭推进，惯性滑行。</p>
-    <p>反向推进可以减速。低速接触小天体可吸收，高速碰撞会碎裂。</p>
-    <p>晋升为岩质行星后，低速伴飞可捕获卫星。</p>
-    <p>滚轮缩放 · O 显示轨迹 · 空格暂停</p>
-    <div id="type-legend" class="legend" aria-label="十二档天体类型"></div>
+  <dialog id="pause-screen" aria-labelledby="pause-title">
+    <h2 id="pause-title">漂流暂停</h2>
+    <p class="pause-shortcuts">WASD 推进 · K 选卫星 · L 吸收 · T 跃迁 · 滚轮缩放</p>
+    <nav class="pause-actions" aria-label="暂停控制">
+      <button id="pause" type="button">继续 <kbd>空格</kbd></button>
+      <button id="orbits" type="button" aria-pressed="true">玩家轨迹 <kbd>O</kbd></button>
+      <button id="save-game" type="button">保存文明</button>
+      <button id="new-game" type="button">返回起点</button>
+    </nav>
+    <div class="pause-info">
+      <p id="drive-status">惯性滑行</p>
+      <p id="gravity-status">引力半径 40px · 强度 2</p>
+      <p id="mass-status"></p>
+      <p id="civilization-status"></p>
+      <p id="damage-status"></p>
+      <p id="jump-status"></p>
+      <p id="kills-status"></p>
+      <p id="satellite-selection">K 循环选择卫星 · L 吸收</p>
+      <p><span id="world-status"></span> · 缩放 <span id="scale">1.00×</span></p>
+      <p id="notice" role="status"></p>
+      <p id="save-status" role="status">手动保存覆盖此浏览器内的上一份存档；返回起点不会自动保存。</p>
+    </div>
+    <details id="help-panel">
+    <summary>操作与天体说明</summary>
+    <p>按住 W / A / S / D：分别向上 / 左 / 下 / 右推进，同时按两个方向可斜向移动。</p>
+    <p>松开方向键：关闭推进，保持惯性。按反方向键可减速。</p>
+    <p>自由天体出生时具有随机方向的初速度，质量越大初速度越小；玩家和天然危险天体同样适用。已有陨石卫星继承宿主速度并叠加慢速绕行速度。读档进入新宇宙时按当前总质量重新分配初速度。</p>
+    <p>大型危险天体接近时显示黄色预警，预测 3 秒内进入危险区时显示红色预警；屏幕外用箭头指示方向。预警采用同一引力模型并保持当前推进方向，不预测未来操作、碰撞、战斗或卫星轨道辅助。恒星光晕与日冕仅为视觉效果。</p>
+    <p>漂流时间按游戏内 1 秒＝1 年显示，暂停不累计。漂流距离按 1 世界像素＝1 km 显示累计路程，不受缩放影响，不计跃迁。存档保留距离与时间；旧存档保留时间，距离从 0 开始累计。</p>
+    <p>陨石可低速碰撞合并；质量达到 12 形成 0 档原始行星，开始孕育生命。行星只能捕获陨石，不能捕获行星。</p>
+    <p>1～6 档分别为水星型、火星型、地球型、超级地球、海王星型、木星型。前五档解锁对应科技上限，第六档只扩展质量与人口容量。新开局选择高档位也需要从初生生命发展科技。</p>
+    <p>所有自然天体均按实际质量相互吸引，包括恒星与黑洞。天体对共用双方较大的作用半径，范围最外侧 20% 平滑衰减；相互作用区外不计算引力。行星的太空城质量也参与计算。母舰、攻击舰既不产生引力，也不受引力影响。</p>
+    <p>玩家基础引力半径缩为同档环境天体的 70%，外围淡虚线表示该范围；内侧点线表示捕获范围，为玩家引力半径的 70%。附近更大范围天体仍可从外部吸引玩家。</p>
+    <p>捕获仅限内侧捕获圈中的陨石，目标总质量须小于你的 1/5，并有空余名额。中速侧面掠过后，卫星通过细线连接并缓慢绕行；外部潮汐过强、速度过快或离开宿主引力半径时会脱离。</p>
+    <p>滚轮缩放 · O 切换玩家轨迹 · 空格暂停。卫星连接线持续显示。</p>
+    <p>0～1 档可携带 2 颗陨石卫星，此后逐档增加，5～6 档最多 6 颗。卫星稳定后约 52 秒绕行一圈；人造卫星不占名额。</p>
+    <p>双击捕获圈内自己的卫星可吸收并增加质量。单击卫星会高亮。已捕获卫星与自己的主星碰撞同样会损失质量。</p>
+    <p>K 循环选择自己的卫星，L 吸收选中的卫星。选择后显示高亮和质量；暂停期间可选择，继续游戏后可吸收。</p>
+    <p>推进速度上限从陨石及 0 档的 200 起，1～5 档逐档增加 50，5～6 档为 450。引力可将速度提升至推进上限的 3 倍，总限为 600～1350。超出推进上限后仍可转向和制动，推进无法继续提速。</p>
+    <p>生命首次孕育需要 30 秒，并在达到 1 档、获得人口容量后产生 20 人口；0 档孕育完成后需继续吸收陨石增重。直接选择高档位开局也要完成孕育。进度条依次显示孕育、人口门槛、科技研究；科技达当前上限后显示人口容量填充情况。</p>
+    <p>实际人口、人口容量与档位均满足门槛后自动研究：1 级护盾，2 级激光，3 级不可攻击的人造卫星及强化火力，4 级太空城与跃迁，5 级吞噬被自身科技击碎行星的剩余质量的一半。</p>
+    <p>文明自主攻击，目标优先级：母舰、攻击舰、陨石、行星。不同文明相互敌对；自身捕获的陨石不受本方攻击。玩家无法指定文明的攻击目标。</p>
+    <p>撞击及激光先消耗护盾，护盾耗尽后损失质量、人口和当前研究进度，保留已解锁科技。太空城质量先于本体受损。总质量低于历史健康峰值的 50% 时破碎，不生成实体碎片。</p>
+    <p>脱战 5 秒后护盾逐步恢复。人口清零会失去文明，重新孕育需要 30 秒。海王星型及木星型在太空城建成前使用超级地球的人口容量。</p>
+    <p>本体质量上限为 3200；继续吸收的质量进入太空城储备，无设定上限。4 级文明启用太空城后，额外质量提供人口容量。</p>
+    <p>4 级后按 T 用鼠标选择当前可见的空旷地带，左键确认，右键 / Esc / T 取消。选点时宇宙继续运行；跃迁保留速度并携带陨石卫星，冷却 60 秒。</p>
+    <p>太空巢穴最多同时激活 3 处，每艘母舰最多 8 艘攻击舰。攻击舰攻击 10 次后返航补给 3 秒；母舰被毁后不再补给或制造舰船。击毁舰船不提供质量，母舰提供少量可用的研究进度。</p>
+    <p>攻击舰速度为 60px/s，活动范围限于母舰中心 300px 半径内，只追击范围内的天体；母舰被毁后仍以其原位置为活动中心。母舰装甲、引擎光和停靠舱为视觉细节，不改变尺寸、血量或火力。</p>
+    <p>恒星、中子星和黑洞仅为不可扮演、不可捕获、不可击毁的天然危险天体。靠近危险圈会受损，接触黑洞会被摧毁。</p>
+    <p>保存记录自身质量、文明、人口、护盾、损伤与击毁计数。读档进入全新沙盒，不保留原宇宙、坐标或陨石卫星；游戏没有通关条件。</p>
+    <div id="type-legend" class="legend" aria-label="行星档位与天然天体"></div>
     <small>尺寸为基础半径，档内最多增加 0.3px。光晕、光柱与星环不参与碰撞。鼠标悬停图例可查看质量门槛。</small>
-    <small>天体类型代表游戏晋升等级，顺序为游戏设定。</small>
-  </aside>
-  <div id="notice" role="status">点击星空，开始你的旅程</div>
-  <footer><span><i class="live-dot"></i><span id="world-status">引力场运行中</span></span><span id="scale">1.00×</span><span class="footer-right">程序宇宙 <b>·</b> 无尽漂流</span></footer>
+    <small>行星名称参照真实天体类别，质量、生命容量及进阶顺序为游戏设定。</small>
+    </details>
+  </dialog>
   <div id="end-screen" class="overlay" hidden><div class="end-card"><div class="eyebrow">THE UNIVERSE REMEMBERS</div><h2>归于星尘</h2><p id="end-description"></p><button id="restart">再点亮一颗星 <span>↗</span></button></div></div>
+  <dialog id="start-screen" aria-labelledby="start-title">
+    <form id="start-form">
+      <div class="eyebrow">CHOOSE YOUR ORIGIN</div>
+      <h2 id="start-title">从哪颗星开始？</h2>
+      <p>选择起始质量档位，文明从初生阶段发展。WASD 移动，空格暂停查看操作。</p>
+      <fieldset id="start-types"><legend>起始天体</legend></fieldset>
+      <p id="start-summary" aria-live="polite"></p>
+      <button class="start-button" type="submit">开始旅程 ↗</button>
+      <div class="save-entry"><button id="load-save" type="button" disabled>载入文明 · 新沙盒</button><p id="save-summary" role="status"></p></div>
+    </form>
+  </dialog>
+  <script src="config.js"></script>
+  <script src="civilization.js"></script>
+  <script src="gravity.js"></script>
   <script src="game.js"></script>
 </body>
 </html>
