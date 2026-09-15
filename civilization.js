@@ -2,132 +2,119 @@
 
 globalThis.SolarCivilization = (() => {
   const config = SolarConfig.civilization;
-  const stage = body => SolarConfig.types[body.type];
-  const eligible = body => !body.natural && stage(body).level >= 1;
+  const totalMass = body => body.mass + body.cityMass;
+  const eligible = body => !body.natural && body.mass >= 24;
   function create() {
-    return { population: 0, tech: 0, research: 0, shield: 0, lastHit: -Infinity, incubation: 0, extinct: false, city: false };
+    return { population: 0, tech: 0, knowledge: 0, research: 0, shield: 0,
+      lastHit: -Infinity, incubation: 0, extinct: false, city: false, shortage: 0,
+      pressure: 0, consumption: 0 };
   }
+  // 适宜人口是供养平衡点，不是截断人口的硬上限。
   function capacity(body) {
-    if (!eligible(body)) return 0;
-    const c = body.civ;
-    const base = stage(body).level >= 5 && !c.city ? SolarConfig.types[5].population : stage(body).population;
-    return base * (c.city ? 1 + config.cityCapacityBonus : 1) + (c.city ? body.cityMass * config.cityPopulationPerMass : 0);
+    if (body.natural || body.mass <= config.minimumMass) return 0;
+    return totalMass(body) * config.populationPerMass * (body.civ.tech >= 6 ? 4 : body.civ.tech >= 5 ? 2 : 1);
   }
-  function stats(body) { return config.technology[body.civ.tech]; }
+  const stats = body => config.technology[body.civ.tech];
   const incubationDuration = body => body.civ.extinct ? config.rebirthSeconds : config.incubationSeconds;
-  function technologyCap(body) {
-    if (!eligible(body)) return 0;
-    const cap = capacity(body);
-    let level = 0;
-    for (let i = 1; i <= stage(body).techCap; i++) {
-      if (cap >= config.technology[i].population) level = i;
-    }
-    return level;
-  }
   function extinguish(body) {
-    Object.assign(body.civ, { population: 0, tech: 0, research: 0, shield: 0, city: false, extinct: true, incubation: 0 });
+    Object.assign(body.civ, create(), { extinct: true });
+  }
+  function spend(body, amount, floor = config.minimumMass) {
+    const taken = Math.min(Math.max(0, totalMass(body) - floor), Math.max(0, amount));
+    const city = Math.min(body.cityMass, taken);
+    body.cityMass -= city;
+    body.mass -= taken - city;
+    return taken;
   }
   function seedLife(body) {
-    const c = body.civ;
-    if (!eligible(body) || c.population > 0 || c.incubation < incubationDuration(body)) return;
-    c.population = Math.min(config.seedPopulation, capacity(body));
-    c.extinct = false;
-    c.incubation = config.incubationSeconds;
+    if (!eligible(body) || body.civ.population > 0 || body.civ.incubation < incubationDuration(body)) return;
+    body.civ.population = config.seedPopulation;
+    body.civ.extinct = false;
   }
   function sync(body) {
     if (body.natural) return;
-    const c = body.civ;
-    if (!eligible(body)) {
-      if (c.population > 0) extinguish(body);
-      if (stage(body).level < 0) c.incubation = 0;
+    if (body.mass < config.minimumMass) {
+      if (body.civ.population > 0) extinguish(body);
+      body.civ.incubation = 0;
       return;
     }
     seedLife(body);
-    c.population = Math.min(c.population, capacity(body));
-    c.shield = Math.min(c.shield, stats(body).shield);
+    body.civ.city = body.civ.tech >= 5;
+    body.civ.shield = Math.min(body.civ.shield, stats(body).shield);
+  }
+  function setLevel(body, level) {
+    const oldShield = stats(body).shield;
+    body.civ.tech = level;
+    body.civ.city = level >= 5;
+    body.civ.shield = Math.max(0, Math.min(stats(body).shield, body.civ.shield + stats(body).shield - oldShield));
   }
   function research(body, seconds) {
-    const c = body.civ;
-    let upgraded = false;
-    // 剩余研究时间只用于当前已经满足人口与容量门槛的下一科技。
-    while (seconds > 0 && c.population > 0 && c.tech < technologyCap(body)) {
-      const next = config.technology[c.tech + 1];
-      if (c.population < next.population) break;
-      const spent = Math.min(seconds, Math.max(0, next.research - c.research));
-      c.research += spent; seconds -= spent;
-      if (c.research < next.research) break;
-      const oldShield = stats(body).shield;
-      c.tech++; c.research = 0; upgraded = true;
-      c.city = c.tech >= 4;
-      c.shield = Math.min(stats(body).shield, c.shield + stats(body).shield - oldShield);
-    }
-    return upgraded;
+    const c = body.civ, next = config.technology[c.knowledge + 1];
+    if (!next || c.population < next.population || c.tech < c.knowledge) return false;
+    const populationRate = Math.min(2, Math.sqrt(c.population / next.population));
+    const pressureRate = c.pressure > 1 ? 1 / (c.pressure * c.pressure) : 1;
+    c.research += seconds * populationRate * pressureRate;
+    if (c.research < next.research) return false;
+    c.research = 0; c.knowledge++;
+    setLevel(body, c.knowledge);
+    return true;
   }
   function tick(body, dt, now) {
-    if (body.natural) return false;
-    const c = body.civ;
-    if (stage(body).level < 0) return false;
+    if (body.natural || body.mass < config.minimumMass) return false;
+    const c = body.civ, oldTech = c.tech;
     if (c.population === 0) {
-      const duration = incubationDuration(body);
-      const spent = Math.min(dt, Math.max(0, duration - c.incubation));
-      c.incubation = Math.min(duration, c.incubation + spent);
-      dt -= spent;
-      seedLife(body);
+      const spent = Math.min(dt, Math.max(0, incubationDuration(body) - c.incubation));
+      c.incubation += spent; dt -= spent; seedLife(body);
       if (c.population === 0 || dt <= 0) return false;
     }
-    if (!eligible(body)) return false;
-    const cap = capacity(body);
-    c.population = Math.min(c.population, cap);
-    const before = c.population, next = config.technology[c.tech + 1];
-    // 封闭形式的逻辑增长避免更新间隔改变人口增长速度。
-    if (c.population > 0 && cap > c.population) c.population = cap / (1 + (cap / c.population - 1) * Math.exp(-Math.LN2 * dt / config.growthDoublingSeconds));
-    let researchTime = dt;
-    // 人口在本次更新中跨过门槛时，仅门槛之后的时间计入研究。
-    if (next && before < next.population) {
-      researchTime = 0;
-      if (cap > next.population && c.population >= next.population) {
-        const crossingTime = Math.log((cap / before - 1) / (cap / next.population - 1)) * config.growthDoublingSeconds / Math.LN2;
-        researchTime = Math.max(0, dt - crossingTime);
-      }
+    const supported = capacity(body);
+    if (supported > 0) {
+      const rate = c.population > supported ? config.declineRate : config.growthRate;
+      // 逻辑增长的解析解保证低帧率时仍平滑趋近供养平衡。
+      c.population = supported / (1 + (supported / c.population - 1) * Math.exp(-rate * dt));
+      c.pressure = c.population / supported;
+    } else {
+      c.population *= Math.exp(-.5 * dt);
+      c.pressure = 4;
     }
-    const upgraded = research(body, researchTime);
-    const regenTime = Math.max(0, Math.min(dt, now - c.lastHit - config.shieldDelay));
-    c.shield = Math.min(stats(body).shield, c.shield + stats(body).shield * config.shieldRegenFraction * regenTime);
-    return upgraded;
+    const demand = c.population / 1e9 * config.upkeepPerBillion * Math.min(3, (1 + c.pressure) / 2);
+    c.consumption = spend(body, demand * dt) / dt;
+    if (c.population < 1) { extinguish(body); return oldTech !== 0; }
+    let operating = c.knowledge;
+    while (operating > 0 && c.population < config.technology[operating].population * config.retentionRatio) operating--;
+    if (operating < c.tech) {
+      c.shortage += dt;
+      if (c.shortage >= config.downgradeDelay) { setLevel(body, operating); c.shortage = 0; }
+    } else {
+      c.shortage = 0;
+      let recovered = c.tech;
+      while (recovered < c.knowledge && c.population >= config.technology[recovered + 1].population) recovered++;
+      if (recovered > c.tech) setLevel(body, recovered);
+    }
+    research(body, dt);
+    const delay = c.city ? config.cityShieldDelay : config.shieldDelay;
+    const regen = c.city ? config.cityShieldRegenFraction : config.shieldRegenFraction;
+    const regenTime = Math.max(0, Math.min(dt, now - c.lastHit - delay));
+    c.shield = Math.min(stats(body).shield, c.shield + stats(body).shield * regen * regenTime);
+    return c.tech !== oldTech;
   }
   function suffer(body, fraction) {
     const c = body.civ;
-    if (c.population <= 0) return;
-    c.population *= 1 - fraction;
-    c.research *= 1 - fraction;
-    if (c.population < 1) extinguish(body);
+    const hadLife = c.population > 0;
+    c.population *= Math.max(0, 1 - fraction);
+    c.research *= Math.max(0, 1 - fraction);
+    if (hadLife && c.population < 1) extinguish(body);
   }
   function progress(body) {
-    const c = body.civ, format = n => Math.floor(n).toLocaleString();
-    if (stage(body).level < 0) {
-      const threshold = SolarConfig.types.find(t => t.level === 0).min;
-      return { label: "Merge asteroids", value: body.mass, total: threshold, detail: `Reach mass ${threshold} to incubate life` };
-    }
-    if (c.population === 0) {
-      const duration = incubationDuration(body), complete = c.incubation >= duration;
-      const first = SolarConfig.types.find(t => t.level === 1);
-      return {
-        label: complete && !eligible(body) ? "Life ready · Reach Luna" : c.extinct ? "Life re-emerging" : "Incubating life",
-        value: Math.min(c.incubation, duration), total: duration,
-        detail: `Incubation ${Math.min(c.incubation, duration).toFixed(1)} / ${duration} s${!eligible(body) ? ` · Absorb asteroids to mass ${first.min} to unlock population capacity` : ` · Seeds ${config.seedPopulation} population`}`
-      };
-    }
-    const cap = capacity(body), ceiling = technologyCap(body), next = config.technology[c.tech + 1];
-    const researchDetail = next ? `Tech ${c.tech + 1} needs population ${format(next.population)} · Research ${c.research.toFixed(1)} / ${next.research} s` : "All technologies unlocked";
-    if (!next || c.tech >= ceiling) return {
-      label: next ? "Growing · Tech capped" : "Growing · Tech complete", value: c.population, total: cap,
-      detail: `Population ${format(c.population)} / ${format(cap)} · Research cap ${ceiling} · ${researchDetail}`
-    };
-    if (c.population < next.population) return {
-      label: `Tech ${c.tech + 1} · Awaiting population`, value: c.population, total: next.population,
-      detail: `${researchDetail} · Research resumes at the population threshold`
-    };
-    return { label: `Tech ${c.tech + 1} · Researching`, value: c.research, total: next.research, detail: researchDetail };
+    const c = body.civ;
+    if (body.mass < config.minimumMass) return { label: "Merge asteroids", value: body.mass, total: config.minimumMass };
+    if (!c.population) return { label: c.incubation >= incubationDuration(body) ? "Life ready · Reach Luna" : "Incubating life", value: c.incubation, total: incubationDuration(body) };
+    if (c.shortage > 0) return { label: "Civilization under strain", value: c.shortage, total: config.downgradeDelay };
+    if (c.tech < c.knowledge) return { label: "Rebuilding civilization", value: c.population, total: config.technology[c.tech + 1].population };
+    const next = config.technology[c.knowledge + 1];
+    if (!next) return { label: "Population balance", value: c.population, total: capacity(body) };
+    if (c.population < next.population) return { label: "Awaiting population", value: c.population, total: next.population };
+    return { label: "Researching", value: c.research, total: next.research };
   }
-  return { create, capacity, stats, sync, research, tick, suffer, eligible, technologyCap, progress };
+  return { create, capacity, stats, sync, research, tick, suffer, eligible, spend, progress };
 })();

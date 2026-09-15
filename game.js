@@ -9,14 +9,15 @@
   const STEP = CONFIG.physicsStep, WORLD_RADIUS = 1800;
   const playerSpeedLimit = type => 200 + Math.max(0, Math.min(5, TYPES[type].level)) * 50;
   const CAPTURE = CONFIG.capture;
-  const POPULATION = { initial: 110, target: 150, nearby: 12, batch: 8, regionSize: 1000 };
+  const POPULATION = CONFIG.population;
   let universeSeed = 0;
   let width, height, dpr, stars, nebula;
   let bodies = [], player = null, particles = [];
   let ships = [], beams = [], nestRecords = new Map(), nextCivilization = 0, nextCombat = 0;
-  let jumping = false, pointer = { x: 0, y: 0 }, savedGame = null;
+  let pointer = { x: 0, y: 0 }, savedGame = null;
   let choosingStart = true;
   let selectedSatelliteId = null, satelliteClickAt = -Infinity;
+  let fleets = createCivilianFleet(), nextFleet = 0;
   let nextId = 1, paused = false, ended = false, showTrails = true;
   let time = 0, lastFrame = 0, accumulator = 0, nextPopulation = 0, nextHud = 0;
   let peakMass = 8, absorbed = 0, shake = 0, driftDistance = 0;
@@ -28,20 +29,17 @@
   const movementKeys = new Set();
   const touchPoints = new Map();
   let drivePointer = null, pinchDistance = 0;
-  const touchLayout = matchMedia("(pointer: coarse)");
   function updateTouchThrust() {
-    if (drivePointer === null || !player || paused || ended || choosingStart || jumping) return;
+    if (drivePointer === null || !player || paused || ended || choosingStart) return;
     const point = touchPoints.get(drivePointer);
     const dx = point.x - screenX(player.x), dy = point.y - screenY(player.y);
     const length = Math.hypot(dx, dy);
     thrust.active = length > 8;
     thrust.x = thrust.active ? dx / length : 0;
     thrust.y = thrust.active ? dy / length : 0;
-    warningCache.at = -Infinity;
   }
   const movementCodes = new Set(["KeyW", "KeyA", "KeyS", "KeyD"]);
   function updateThrust() {
-    warningCache.at = -Infinity;
     const x = Number(movementKeys.has("KeyD")) - Number(movementKeys.has("KeyA"));
     const y = Number(movementKeys.has("KeyS")) - Number(movementKeys.has("KeyW"));
     const length = Math.hypot(x, y);
@@ -69,7 +67,7 @@
   };
 
   function updateSize(body) {
-    if (body.natural) { body.radius = TYPES[body.type].radius; return; }
+    if (body.natural) { body.radius = TYPES[body.type].radius * (.7 + .3 * Math.min(1, body.mass / TYPES[body.type].mass)); return; }
     body.type = typeOf(body.mass);
     const base = TYPES[body.type];
     const upper = body.type < 7 ? TYPES[body.type + 1].min : CONFIG.maxPlanetMass;
@@ -86,10 +84,19 @@
 
   function createBody(x, y, mass, velocity = initialVelocity(mass), naturalType = null) {
     const { vx, vy } = velocity;
-    const body = { id: nextId++, x, y, px: x, py: y, vx, vy, ax: 0, ay: 0, mass, cityMass: 0, healthyMass: mass, natural: naturalType !== null, type: naturalType, civ: CIV.create(), kills: { asteroid: 0, planet: 0, fighter: 0, mothership: 0 }, nextAttack: 0, nextAbsorb: 0, jumpReady: 0, hazardReady: 0, alive: true, trail: [], trailAt: 0, host: null, orbitRadius: 0, orbitDirection: 1, captureAfter: 0, cooldown: 0, phase: random(0, Math.PI * 2) };
+    const body = { id: nextId++, x, y, px: x, py: y, vx, vy, ax: 0, ay: 0, mass, cityMass: 0, healthyMass: mass, integrity: 1, natural: naturalType !== null, type: naturalType, civ: CIV.create(), kills: { asteroid: 0, planet: 0, fighter: 0, mothership: 0 }, nextAttack: 0, nextAbsorb: 0, recallUntil: 0, hazardReady: 0, alive: true, trail: [], trailAt: 0, host: null, orbitRadius: 0, orbitDirection: 1, captureAfter: 0, cooldown: 0, phase: random(0, Math.PI * 2) };
     updateSize(body);
     bodies.push(body);
     return body;
+  }
+
+  function createCivilianFleet() {
+    return SolarFleet.create({
+      bodies: () => bodies, enemies: () => ships, player: () => player,
+      id: () => nextId++, resize: updateSize, destroy: destroyUnit, gain: gainMass,
+      fire: (attacker, target, damage) => fireLaser(attacker, target, damage, "#91ddff"),
+      harvest: harvestMass
+    });
   }
 
   function announce(message) {
@@ -130,6 +137,12 @@
     return Math.min(.9, density);
   }
 
+  function weightedIndex(weights) {
+    let roll = Math.random() * weights.reduce((sum, n) => sum + n, 0);
+    for (let i = 0; i < weights.length; i++) { roll -= weights[i]; if (roll <= 0) return i; }
+    return weights.length - 1;
+  }
+
   function spawnAmbient(initial = false) {
     const screenRadius = Math.hypot(width, height) / (2 * camera.zoom);
     const innerRadius = initial ? 260 : Math.max(900, screenRadius + 180);
@@ -146,21 +159,28 @@
     }
     if (!position) return;
     const roll = Math.random();
-    // 陨石与行星参与成长，天然致密天体仅作为环境危险源。
     let mass;
-    if (roll < .76) mass = random(1, 11);
-    else if (roll < .98) mass = random(24, Math.min(CONFIG.maxPlanetMass, Math.max(80, player.mass * 2)));
-    else { const type = Math.floor(random(8, 11)); createBody(position.x, position.y, TYPES[type].mass, initialVelocity(TYPES[type].mass), type); return; }
+    if (roll < POPULATION.asteroidChance) mass = random(1, 11);
+    else if (roll > 1 - POPULATION.naturalChance && bodies.filter(b => b.alive && b.natural).length < POPULATION.naturalLimit) {
+      const type = weightedIndex([75, 20, 5]) + 8;
+      createBody(position.x, position.y, TYPES[type].mass, initialVelocity(TYPES[type].mass), type);
+      return;
+    } else {
+      let type = weightedIndex(POPULATION.planetWeights) + 2;
+      if (type >= 5 && bodies.filter(b => b.alive && !b.natural && b.mass >= TYPES[5].min).length >= POPULATION.largePlanetLimit) type = 2 + weightedIndex([6, 3, 1]);
+      mass = random(TYPES[type].min, type < 7 ? TYPES[type + 1].min - 1 : CONFIG.maxPlanetMass);
+    }
     const body = createBody(position.x, position.y, mass);
     if (CIV.eligible(body)) {
-      if (Math.random() < .3) { body.civ.incubation = random(0, CONFIG.civilization.incubationSeconds); }
+      if (Math.random() < .4) body.civ.incubation = random(0, CONFIG.civilization.incubationSeconds);
       else {
-        body.civ.tech = Math.floor(random(0, TYPES[body.type].techCap + 1));
-        body.civ.city = body.civ.tech >= 4;
-        body.civ.population = Math.max(CONFIG.civilization.technology[body.civ.tech].population, CIV.capacity(body) * random(.1, .75));
+        let level = weightedIndex(POPULATION.technologyWeights);
+        if (level >= 4 && bodies.filter(b => b !== body && b.alive && b.civ.tech >= 4).length >= POPULATION.advancedCivilizationLimit) level = weightedIndex([4, 3, 2, 1]);
+        while (level > 0 && CONFIG.civilization.technology[level].population > bodyMass(body) * CONFIG.civilization.populationPerMass * (level >= 6 ? 4 : level >= 5 ? 2 : 1)) level--;
+        body.civ.tech = level; body.civ.knowledge = level; body.civ.city = level >= 5;
+        body.civ.population = Math.max(CONFIG.civilization.seedPopulation, CONFIG.civilization.technology[level].population, CIV.capacity(body) * random(.1, .5));
         body.civ.incubation = CONFIG.civilization.incubationSeconds;
         body.civ.shield = CIV.stats(body).shield;
-        body.civ.research = 0;
       }
     }
     if (isPlanet(body) && initial) {
@@ -176,12 +196,14 @@
 
   function reset(startType, snapshot = null) {
     bodies = []; particles = []; nextId = 1;
-    ships = []; beams = []; nestRecords = new Map(); nextCivilization = 0; nextCombat = 0; jumping = false;
+    ships = []; beams = []; nestRecords = new Map(); nextCivilization = 0; nextCombat = 0;
     universeSeed = Math.floor(Math.random() * 4294967296);
     selectedSatelliteId = null; satelliteClickAt = -Infinity;
     const startMass = startType === 0 ? 8 : TYPES[startType].min;
     player = createBody(0, 0, startMass);
     player.isPlayer = true;
+    fleets = createCivilianFleet();
+    nextFleet = 0;
     camera.x = 0; camera.y = 0; camera.zoom = 1; camera.targetZoom = 1;
     clearMovement(); paused = false; ended = false; choosingStart = false;
     time = 0; accumulator = 0; lastFrame = 0; nextPopulation = 2; nextHud = 0; peakMass = startMass; absorbed = 0; shake = 0;
@@ -281,32 +303,36 @@
   }
 
   function gainMass(body, amount) {
+    const oldType = body.type;
     const available = Math.max(0, CONFIG.maxPlanetMass - body.mass);
     body.mass += Math.min(available, amount);
     body.cityMass += Math.max(0, amount - available);
+    body.integrity = Math.min(1, (Math.max(0, bodyMass(body) - amount) * body.integrity + amount) / bodyMass(body));
     body.healthyMass = Math.max(body.healthyMass, bodyMass(body));
     updateSize(body);
-    if (body === player) peakMass = Math.max(peakMass, bodyMass(body));
+    if (body === player) {
+      peakMass = Math.max(peakMass, bodyMass(body));
+      if (body.type !== oldType) announce(`${TYPES[body.type].name} · A new chapter for your world`);
+    }
   }
 
   function destroyUnit(target, attacker, cause) {
-    if (!target.alive || target.natural) return;
-    const remainingMass = target.entity ? 0 : bodyMass(target);
+    if (!target.alive || target.natural || target.entity === "carrier") return;
     const wasPlanet = !target.entity && isPlanet(target);
     target.alive = false;
     burst(target.x, target.y, target.entity ? "#ff6f72" : TYPES[target.type].color, 24, 45);
-    if (attacker?.alive && !attacker.entity && !attacker.natural) {
-      const category = target.entity || (wasPlanet ? "planet" : "asteroid");
-      attacker.kills[category]++;
-      if (category === "mothership") CIV.research(attacker, CONFIG.civilization.mothershipResearchReward);
-      if (cause === "laser" && wasPlanet && attacker.civ.tech === 5) gainMass(attacker, remainingMass * CONFIG.combat.devourFraction);
-      if (attacker === player && category === "mothership") announce("The nest has fallen silent");
+    const credited = attacker?.entity === "drone" ? attacker.owner : attacker;
+    if (credited?.alive && !credited.entity && !credited.natural) {
+      const category = target.entity === "drone" ? "fighter" : target.entity || (wasPlanet ? "planet" : "asteroid");
+      credited.kills[category]++;
+      if (category === "mothership") CIV.research(credited, CONFIG.civilization.mothershipResearchReward);
+      if (credited === player && category === "mothership") announce("The nest has fallen silent");
     }
     if (target === player) die("Your world suffered critical damage.");
   }
 
   function damageUnit(target, amount, attacker, cause) {
-    if (!target.alive || target.natural || amount <= 0) return;
+    if (!target.alive || target.natural || target.entity === "carrier" || amount <= 0) return;
     if (target === player && cause === "laser" && time - target.civ.lastHit >= 5 && performance.now() - lastAttackNotice >= 12000) {
       lastAttackNotice = performance.now();
       announce("Hostile fire detected");
@@ -326,8 +352,9 @@
     const cityLoss = Math.min(target.cityMass, loss);
     target.cityMass -= cityLoss;
     target.mass = Math.max(0, target.mass - (loss - cityLoss));
+    target.integrity = Math.max(0, target.integrity - loss / total);
     CIV.suffer(target, loss / total);
-    if (bodyMass(target) < target.healthyMass * (1 - CONFIG.combat.breakLoss) || target.mass < .6) destroyUnit(target, attacker, cause);
+    if (target.integrity < 1 - CONFIG.combat.breakLoss || target.mass < .6) destroyUnit(target, attacker, cause);
     else updateSize(target);
   }
 
@@ -343,12 +370,20 @@
   function selectCivilizationTarget(body) {
     const range = CIV.stats(body).range;
     let target = null, priority = Infinity, nearest = Infinity;
-    for (const candidate of [...ships, ...bodies]) {
-      if (!candidate.alive || candidate.natural || (!candidate.entity && sameSystem(body, candidate))) continue;
+    for (const candidate of fleets.nearby(body, range)) {
+      if (!candidate.alive || candidate.natural || candidate.entity === "carrier" ||
+          candidate.mode === "dock" || candidate.ownerId === body.id || (!candidate.entity && sameSystem(body, candidate))) continue;
       const distance = Math.hypot(candidate.x - body.x, candidate.y - body.y);
       if (distance > range) continue;
-      const rank = candidate.entity === "mothership" ? 0 : candidate.entity === "fighter" ? 1 : candidate.type === 0 ? 2 : 3;
-      if (rank < priority || (rank === priority && distance < nearest)) { target = candidate; priority = rank; nearest = distance; }
+      if (!candidate.entity && candidate.type === 0) {
+        const dx = candidate.x - body.x, dy = candidate.y - body.y;
+        const vx = candidate.vx - body.vx, vy = candidate.vy - body.vy, speed2 = vx * vx + vy * vy;
+        const closest = speed2 > 0 ? -(dx * vx + dy * vy) / speed2 : Infinity;
+        if (closest < 0 || closest > CONFIG.fleet.cannonThreatSeconds ||
+            Math.hypot(dx + vx * closest, dy + vy * closest) > body.radius + candidate.radius + 5) continue;
+      } else if (!candidate.entity && candidate.civ.population <= 0) continue;
+      const rank = candidate.entity === "mothership" ? 0 : candidate.entity ? 1 : candidate.type === 0 ? 2 : 3;
+      if (rank < priority || rank === priority && distance < nearest) { target = candidate; priority = rank; nearest = distance; }
     }
     return target;
   }
@@ -356,27 +391,38 @@
   function updateCivilizations(dt) {
     for (const body of bodies) {
       if (!body.alive || body.natural) continue;
-      const hadLife = body.civ.population > 0;
-      if (CIV.tick(body, dt, time) && body === player) announce(["", "A shield now shelters your world", "Your civilization has learned to defend itself", "Artificial moons take their first flight", "A city rises beyond the sky · Jump unlocked", "Your civilization has mastered stellar harvesting"][body.civ.tech]);
-      if (body === player && !hadLife && body.civ.population > 0) announce("Life has emerged on your world");
-      // 环境行星自主吸收已经捕获的陨石，玩家通过 K/L 决定吸收时机。
+      const hadLife = body.civ.population > 0, oldTech = body.civ.tech;
+      CIV.tick(body, dt, time); updateSize(body);
+      if (body === player) {
+        if (body.civ.tech > oldTech) announce(["", "A shield now shelters your world", "Point defense is online",
+          "Your first orbital carrier is ready", "The orbital fleet has expanded", "A city rises beyond the sky",
+          "A second city surrounds your world", "Stellar mining is now possible"][body.civ.tech]);
+        if (body.civ.tech < oldTech) announce("Civilization has lost an operating level");
+        if (!hadLife && body.civ.population > 0) announce("Life has emerged on your world");
+        if (hadLife && body.civ.population === 0) announce("Your civilization has fallen silent");
+      }
       if (body !== player && isPlanet(body) && time >= body.nextAbsorb) {
         body.nextAbsorb = time + random(8, 15);
         const rock = bodies.find(b => b.alive && b.type === 0 && b.host === body.id);
         if (rock) absorb(body, rock);
       }
     }
+    fleets.sync(time);
   }
 
   function updateCombat(dt) {
     for (const body of bodies) {
       if (!body.alive || body.natural || body.civ.tech < 2 || time < body.nextAttack) continue;
+      body.nextAttack = time + .2;
       const target = selectCivilizationTarget(body);
-      if (target) { body.nextAttack = time + CIV.stats(body).interval; fireLaser(body, target, CIV.stats(body).damage, TYPES[body.type].color); }
-      if (body !== player && body.civ.city && body.jumpReady <= time && body.civ.shield < CIV.stats(body).shield * .2 && time - body.civ.lastHit < 2) {
-        const a = random(0, Math.PI * 2), r = random(180, 380);
-        const x = body.x + Math.cos(a) * r, y = body.y + Math.sin(a) * r;
-        if (jumpClear(body, x, y)) performJump(body, x, y);
+      if (target) {
+        body.nextAttack = time + CIV.stats(body).interval;
+        fireLaser(body, target, CIV.stats(body).damage, TYPES[body.type].color);
+        const beam = beams[beams.length - 1]; beam.cannon = true;
+        if (body.civ.city) {
+          const angle = Math.atan2(target.y - body.y, target.x - body.x), shell = body.radius + (body.civ.tech >= 6 ? 19 : 12);
+          beam.x += Math.cos(angle) * shell; beam.y += Math.sin(angle) * shell;
+        }
       }
     }
     updateFleet(dt);
@@ -412,8 +458,8 @@
 
   function nearestFleetTarget(ship, range) {
     let result = null, nearest = range;
-    for (const body of bodies) {
-      if (!body.alive || body.natural) continue;
+    for (const body of [...bodies, ...fleets.units]) {
+      if (!body.alive || body.natural || body.entity === "carrier" || body.mode === "dock") continue;
       if (ship.entity === "fighter") {
         const mother = nestRecords.get(ship.mother);
         if (Math.hypot(body.x - mother.x, body.y - mother.y) > CONFIG.nests.activityRadius) continue;
@@ -460,7 +506,7 @@
       ship.vx += ((distance ? dx / distance * desired : 0) - ship.vx) * blend;
       ship.vy += ((distance ? dy / distance * desired : 0) - ship.vy) * blend;
       if (ship.mode === "return" && distance < 20) { ship.mode = "dock"; ship.dockTime = cfg.resupplySeconds; ship.vx = 0; ship.vy = 0; }
-      else if (ship.mode === "attack" && target.civ && distance < cfg.range && time >= ship.nextAttack) {
+      else if (ship.mode === "attack" && (target.civ || target.entity === "drone") && distance < cfg.range && time >= ship.nextAttack) {
         fireLaser(ship, target, cfg.damage, "#ff526e"); ship.shots--; ship.nextAttack = time + cfg.interval;
         if (ship.shots === 0) ship.mode = mother?.alive ? "return" : "spent";
       }
@@ -480,7 +526,6 @@
       limitPlayerSpeed();
       absorbed++; peakMass = Math.max(peakMass, a.mass);
       if (a.type !== oldType) {
-        announce(`${TYPES[a.type].name} · A new chapter for your world`);
         burst(a.x, a.y, TYPES[a.type].color, 60, 60);
       }
     }
@@ -489,7 +534,7 @@
   }
 
   function die(reason) {
-    ended = true; jumping = false; clearMovement();
+    ended = true; clearMovement();
     SolarLanguage.text(ui["end-description"], `${reason} Peak mass ${peakMass.toFixed(1)}, absorbed ${absorbed} bodies, drifted for ${Math.floor(time).toLocaleString()} years, travelled ${Math.floor(driftDistance).toLocaleString()} km.`);
     ui["end-screen"].hidden = false;
   }
@@ -577,7 +622,7 @@
         b.px = b.x; b.py = b.y;
         GRAVITY.kick(b, h * .5, thrust);
         b.x += b.vx * h; b.y += b.vy * h;
-        // 累计物理移动路程，跃迁与镜头移动不计入漂流距离。
+        // 累计天体的实际移动路程，镜头移动不计入漂流距离。
         if (b === player) driftDistance += Math.hypot(b.x - b.px, b.y - b.py);
       }
       spatial = GRAVITY.accumulate(bodies);
@@ -591,10 +636,14 @@
       nextCivilization += CONFIG.civilization.tick;
       updateCivilizations(CONFIG.civilization.tick);
     }
+    if (time >= nextFleet) {
+      nextFleet = time + CONFIG.fleet.decisionInterval;
+      fleets.decisions(time);
+    }
+    fleets.move(dt, time);
     if (time >= nextCombat) {
       nextCombat = time + CONFIG.combat.tick;
       updateCombat(CONFIG.combat.tick);
-      if (player.civ.tech < 4 || !player.civ.city) jumping = false;
     }
     if (ended) return;
     for (const ship of ships) if (ship.alive) {
@@ -633,6 +682,10 @@
       const retention = Math.max(WORLD_RADIUS + 600, Math.hypot(width, height) / (2 * camera.zoom) + 900);
       const retainedIds = new Set([player.id]);
       for (const b of bodies) if (b.host === player.id) retainedIds.add(b.id);
+      for (const unit of fleets.units) if (unit.alive && unit.entity === "drone" && unit.mode !== "dock") {
+        retainedIds.add(unit.ownerId);
+        if (unit.target && !unit.target.entity) retainedIds.add(unit.target.id);
+      }
       const fieldIndex = GRAVITY.spatialIndex(bodies), protectedIds = new Set(retainedIds);
       const visible = bodies.filter(b => retainedIds.has(b.id) || (Math.abs(screenX(b.x) - width / 2) <= width / 2 + 180 && Math.abs(screenY(b.y) - height / 2) <= height / 2 + 180));
       for (const b of visible) {
@@ -668,78 +721,55 @@
     }
   }
 
-  function jumpClear(body, x, y) {
-    const members = bodies.filter(b => b.alive && (b === body || b.host === body.id));
-    const memberIds = new Set(members.map(b => b.id));
-    for (const member of members) {
-      const tx = x + member.x - body.x, ty = y + member.y - body.y;
-      for (const other of [...bodies, ...ships]) {
-        if (!other.alive || memberIds.has(other.id)) continue;
-        const clearance = other.natural ? TYPES[other.type].hazardRange : other.radius;
-        if (Math.hypot(tx - other.x, ty - other.y) <= member.radius + clearance + CONFIG.jump.clearance) return false;
+  function harvestMass(target, amount, owner, now) {
+    if (!target.alive || amount <= 0 || target === owner || target.host === owner.id ||
+        target.natural && (owner.civ.tech < 7 || target.type === 10) || !target.natural && target.civ.shield > 0) return 0;
+    if (!target.natural && target.civ.population > 0) target.civ.lastHit = now;
+    const before = bodyMass(target), taken = CIV.spend(target, amount, 0);
+    if (!target.natural) CIV.suffer(target, before > 0 ? taken / before : 0);
+    if (bodyMass(target) < .6) {
+      if (target.natural) { target.alive = false; burst(target.x, target.y, "#ffdc94", 20, 20); }
+      else destroyUnit(target, owner, "harvest");
+    } else {
+      if (target.natural && target.type === 9 && target.mass < 8000) target.type = 8;
+      if (target.natural && target.type === 8 && target.mass < 1600) {
+        target.natural = false; target.civ = CIV.create(); target.integrity = 1;
       }
+      updateSize(target);
     }
-    return true;
+    return taken;
   }
 
-  function performJump(body, x, y) {
-    if (body === player && (screenX(x) < 0 || screenX(x) > width || screenY(y) < 0 || screenY(y) > height)) return false;
-    if (!body.alive || !body.civ.city || body.civ.tech < 4 || time < body.jumpReady || !jumpClear(body, x, y)) return false;
-    const dx = x - body.x, dy = y - body.y;
-    const members = bodies.filter(b => b.alive && (b === body || b.host === body.id));
-    for (const member of members) {
-      burst(member.x, member.y, "#b9aaff", 12, 22);
-      member.x += dx; member.y += dy; member.px = member.x; member.py = member.y;
-      member.trail = [];
-      burst(member.x, member.y, "#94e8ff", 18, 28);
-    }
-    body.jumpReady = time + CONFIG.jump.cooldown;
-    warningCache.at = -Infinity;
-    if (body === player) { jumping = false; announce("A new sky awaits"); }
-    return true;
-  }
-
-  function jumpTarget() {
-    return { x: camera.x + (pointer.x - width / 2) / camera.zoom, y: camera.y + (pointer.y - height / 2) / camera.zoom };
-  }
-
-  function toggleJump() {
+  function recallFleet() {
     if (paused || ended || choosingStart) return;
-    clearMovement();
-    if (jumping) { jumping = false; return; }
-    if (!player.civ.city || player.civ.tech < 4) return;
-    if (time < player.jumpReady) return;
-    jumping = true;
-
+    fleets.recall(player, time);
+    refreshHud();
   }
 
   function playerSnapshot() {
     const c = player.civ;
     return {
-      version: 1, savedAt: Date.now(), mass: player.mass, cityMass: player.cityMass,
-      healthyMass: player.healthyMass, peakMass, absorbed, elapsed: time, distance: driftDistance,
-      jumpRemaining: Math.max(0, player.jumpReady - time),
-      civ: { population: c.population, tech: c.tech, research: c.research, shield: c.shield,
-        incubation: c.incubation, extinct: c.extinct, city: c.city, hitAgo: Math.min(CONFIG.civilization.shieldDelay, time - c.lastHit) },
+      version: 2, savedAt: Date.now(), mass: player.mass, cityMass: player.cityMass,
+      healthyMass: player.healthyMass, integrity: player.integrity, peakMass, absorbed, elapsed: time, distance: driftDistance,
+      recallRemaining: Math.max(0, player.recallUntil - time),
+      civ: { population: c.population, tech: c.tech, knowledge: c.knowledge, research: c.research, shield: c.shield,
+        shortage: c.shortage, pressure: c.pressure, consumption: c.consumption,
+        incubation: c.incubation, extinct: c.extinct, city: c.city, hitAgo: Math.min(10, time - c.lastHit) },
       kills: { ...player.kills }
     };
   }
 
   function validSnapshot(s) {
-    if (!s || s.version !== 1 || !s.civ || !s.kills) return false;
-    const numeric = [s.savedAt, s.mass, s.cityMass, s.healthyMass, s.peakMass, s.absorbed, s.elapsed, s.distance === undefined ? 0 : s.distance, s.jumpRemaining,
-      s.civ.population, s.civ.tech, s.civ.research, s.civ.shield, s.civ.incubation, s.civ.hitAgo,
-      s.kills.asteroid, s.kills.planet, s.kills.fighter, s.kills.mothership];
+    if (!s || s.version !== 2 || !s.civ || !s.kills) return false;
+    const numeric = [s.savedAt, s.mass, s.cityMass, s.healthyMass, s.integrity, s.peakMass, s.absorbed, s.elapsed, s.distance, s.recallRemaining,
+      s.civ.population, s.civ.tech, s.civ.knowledge, s.civ.research, s.civ.shield, s.civ.incubation, s.civ.hitAgo,
+      s.civ.shortage, s.civ.pressure, s.civ.consumption, s.kills.asteroid, s.kills.planet, s.kills.fighter, s.kills.mothership];
     if (!numeric.every(n => typeof n === "number" && Number.isFinite(n) && n >= 0)) return false;
-    if (s.mass < .6 || s.mass > CONFIG.maxPlanetMass || !Number.isInteger(s.civ.tech) || s.civ.tech > 5) return false;
-    if (typeof s.civ.extinct !== "boolean" || typeof s.civ.city !== "boolean") return false;
-    if (s.civ.city !== (s.civ.tech >= 4) || s.civ.shield > CONFIG.civilization.technology[s.civ.tech].shield) return false;
-    const savedBody = { type: typeOf(s.mass), natural: false, cityMass: s.cityMass, civ: s.civ };
-    if (s.civ.population > CIV.capacity(savedBody) || (s.civ.population > 0 && s.civ.population < 1)) return false;
-    if (s.civ.extinct && s.civ.population > 0) return false;
-    if (s.civ.population === 0 && (s.civ.tech > 0 || s.civ.research > 0 || s.civ.shield > 0)) return false;
-    const total = s.mass + s.cityMass;
-    return Number.isFinite(total) && s.healthyMass >= total && total >= s.healthyMass * .5 && s.peakMass >= total;
+    if (s.mass < .6 || s.mass > CONFIG.maxPlanetMass || s.integrity < 1 - CONFIG.combat.breakLoss || s.integrity > 1) return false;
+    if (![s.civ.tech, s.civ.knowledge].every(n => Number.isInteger(n) && n <= 7) || s.civ.tech > s.civ.knowledge) return false;
+    if (typeof s.civ.extinct !== "boolean" || s.civ.city !== (s.civ.tech >= 5)) return false;
+    if (s.civ.shield > CONFIG.civilization.technology[s.civ.tech].shield || s.civ.extinct && s.civ.population > 0) return false;
+    return s.healthyMass >= s.mass + s.cityMass && s.peakMass >= s.mass + s.cityMass;
   }
 
   function readSave() {
@@ -747,11 +777,11 @@
     savedGame = null; load.disabled = true;
     try {
       const raw = localStorage.getItem(CONFIG.saveKey);
-      if (raw === null) { SolarLanguage.text(status, "No save yet · Autosave starts with your journey."); return; }
+      if (raw === null) { SolarLanguage.text(status, "No save for this civilization era yet."); return; }
       const snapshot = JSON.parse(raw);
       if (!validSnapshot(snapshot)) { SolarLanguage.text(status, "Invalid save data."); return; }
       savedGame = snapshot; load.disabled = false;
-      SolarLanguage.text(status, `${TYPES[typeOf(snapshot.mass)].name} · Tech ${snapshot.civ.tech} · population ${Math.floor(snapshot.civ.population).toLocaleString()} · ${new Date(snapshot.savedAt).toLocaleString()}`);
+      SolarLanguage.text(status, `${TYPES[typeOf(snapshot.mass)].name} · Tech ${snapshot.civ.tech} · population ${(snapshot.civ.population / 1e6).toFixed(1)} M · ${new Date(snapshot.savedAt).toLocaleString()}`);
     } catch (error) {
       SolarLanguage.text(status, "Unable to read save. Check browser storage permissions.");
     }
@@ -767,14 +797,13 @@
   }
 
   function restorePlayer(snapshot) {
-    player.mass = snapshot.mass; player.cityMass = snapshot.cityMass; player.healthyMass = snapshot.healthyMass;
+    player.mass = snapshot.mass; player.cityMass = snapshot.cityMass; player.healthyMass = snapshot.healthyMass; player.integrity = snapshot.integrity;
     time = snapshot.elapsed; peakMass = snapshot.peakMass; absorbed = snapshot.absorbed;
-    // 未记录历史距离的存档从零开始累计，原有时间保持不变。
-    driftDistance = snapshot.distance ?? 0;
+    driftDistance = snapshot.distance;
     player.civ = { ...snapshot.civ, lastHit: time - snapshot.civ.hitAgo };
     delete player.civ.hitAgo;
     player.kills = { ...snapshot.kills };
-    player.jumpReady = time + snapshot.jumpRemaining;
+    player.recallUntil = time + snapshot.recallRemaining;
     nextPopulation = time + 2;
     updateSize(player);
     Object.assign(player, initialVelocity(bodyMass(player)));
@@ -914,7 +943,7 @@
       ctx.strokeStyle = `${color}28`; ctx.lineWidth = .6; ctx.stroke();
       return;
     }
-    const c = b.civ, shell = (b.radius + 4) * camera.zoom;
+    const c = b.civ, shell = (b.radius + (c.city ? 12 : 4)) * camera.zoom;
     if (c.population > 0) {
       const lights = Math.min(6, 1 + Math.floor(Math.log10(c.population)));
       for (let i = 0; i < lights; i++) {
@@ -944,12 +973,21 @@
         ctx.fillRect(x + Math.cos(angle) * shell - 1, y + Math.sin(angle) * shell - 1, 2, 2);
       }
     }
-    // 人造卫星是文明设施的绘制标记，不创建可攻击实体。
-    if (c.tech >= 3) for (let i = 0; i < 3; i++) {
-      const angle = time * .25 + b.phase + i * Math.PI * 2 / 3, orbit = shell + 5 * camera.zoom;
-      const sx = x + Math.cos(angle) * orbit, sy = y + Math.sin(angle) * orbit;
-      ctx.fillStyle = "#91cce3"; ctx.fillRect(sx - 2 * camera.zoom, sy - .5, 4 * camera.zoom, 1);
-      circle(sx, sy, Math.max(.6, camera.zoom), "#edf9ff");
+    if (c.tech >= 6) {
+      ctx.beginPath(); ctx.arc(x, y, shell + 7 * camera.zoom, 0, Math.PI * 2);
+      ctx.strokeStyle = "#bfe9ff99"; ctx.lineWidth = 1; ctx.stroke();
+      for (let i = 0; i < 8; i++) {
+        const angle = i * Math.PI / 4 - time * .025;
+        circle(x + Math.cos(angle) * (shell + 7 * camera.zoom), y + Math.sin(angle) * (shell + 7 * camera.zoom), camera.zoom, "#cdefff");
+      }
+    }
+    if (c.tech >= 2) {
+      const orbit = c.city ? shell + (c.tech >= 6 ? 7 * camera.zoom : 0) : r + 2 * camera.zoom;
+      for (let i = 0; i < 3; i++) {
+        const angle = b.phase + i * Math.PI * 2 / 3;
+        ctx.save(); ctx.translate(x + Math.cos(angle) * orbit, y + Math.sin(angle) * orbit); ctx.rotate(angle);
+        ctx.fillStyle = "#ffd7a0"; ctx.fillRect(-camera.zoom, -camera.zoom, 4 * camera.zoom, 2 * camera.zoom); ctx.restore();
+      }
     }
   }
 
@@ -987,18 +1025,31 @@
   }
 
   function drawShip(ship) {
-    if (!ship.alive) return;
+    if (!ship.alive || ship.entity === "drone" && ship.mode === "dock") return;
     const x = screenX(ship.x), y = screenY(ship.y), r = ship.radius * camera.zoom;
     if (x < -30 || x > width + 30 || y < -30 || y > height + 30) return;
     ctx.save(); ctx.translate(x, y);
     ctx.rotate(ship.entity === "mothership" ? time * .05 : Math.atan2(ship.vy, ship.vx));
     if (ship.entity === "mothership") drawMothership(ship, r);
+    else if (ship.entity === "carrier") {
+      ctx.fillStyle = "#273c57"; ctx.strokeStyle = "#a9e8e4"; ctx.lineWidth = .8;
+      ctx.beginPath(); ctx.moveTo(r, 0); ctx.lineTo(r * .3, r * .65); ctx.lineTo(-r, r * .65);
+      ctx.lineTo(-r * .7, -r * .65); ctx.lineTo(r * .3, -r * .65); ctx.closePath(); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = "#91ebf0"; ctx.fillRect(-r * .5, -r * .12, r, r * .24);
+      glow(-r, 0, r * .7, "#6bcbff55");
+    }
     else {
       ctx.beginPath(); ctx.moveTo(r, 0); ctx.lineTo(-r, r * .7); ctx.lineTo(-r * .4, 0); ctx.lineTo(-r, -r * .7);
-      ctx.closePath(); ctx.fillStyle = ship.mode === "spent" ? "#635d69" : "#ac4e67"; ctx.fill();
-      ctx.strokeStyle = "#ff92a0"; ctx.lineWidth = .7; ctx.stroke();
+      ctx.closePath(); ctx.fillStyle = ship.entity === "drone" ? ship.owner === player ? "#74c9d1" : "#bc8ade" : ship.mode === "spent" ? "#635d69" : "#ac4e67"; ctx.fill();
+      ctx.strokeStyle = ship.entity === "drone" ? "#d0f6ff" : "#ff92a0"; ctx.lineWidth = .7; ctx.stroke();
+      if (ship.entity === "drone" && ship.cargo > 0) circle(-r, 0, camera.zoom, "#ffd27c");
     }
     ctx.restore();
+    if (ship.entity === "drone" && ship.owner === player) {
+      const endurance = clamp((ship.expires - time) / (ship.expires - ship.departed), 0, 1);
+      ctx.fillStyle = endurance < .25 ? "#ff6575" : "#76b9c6";
+      ctx.fillRect(x - r, y + r + 3, r * 2 * endurance, 1);
+    }
     if (ship.hp < ship.maxHp) {
       ctx.fillStyle = "#6c3b47"; ctx.fillRect(x - r, y - r - 4, r * 2, 1);
       ctx.fillStyle = "#ff9bad"; ctx.fillRect(x - r, y - r - 4, r * 2 * Math.max(0, ship.hp / ship.maxHp), 1);
@@ -1044,11 +1095,11 @@
       }
     }
     for (const b of bodies) drawBody(b);
-    for (const ship of ships) drawShip(ship);
+    for (const ship of [...ships, ...fleets.units]) drawShip(ship);
     for (const beam of beams) {
       ctx.globalAlpha = clamp(beam.life / .18, 0, 1);
       ctx.beginPath(); ctx.moveTo(screenX(beam.x), screenY(beam.y)); ctx.lineTo(screenX(beam.tx), screenY(beam.ty));
-      ctx.strokeStyle = beam.color; ctx.lineWidth = .9; ctx.stroke();
+      ctx.strokeStyle = beam.color; ctx.lineWidth = beam.cannon ? 2.3 : .9; ctx.stroke();
     }
     ctx.globalAlpha = 1;
     for (const p of particles) { ctx.globalAlpha = clamp(p.life / p.total, 0, 1); circle(screenX(p.x), screenY(p.y), Math.max(.55, camera.zoom), p.color); }
@@ -1065,14 +1116,6 @@
       }
       drawWarnings();
     }
-    if (jumping && player?.alive) {
-      const target = jumpTarget(), clear = jumpClear(player, target.x, target.y);
-      ctx.save(); ctx.setLineDash([3, 4]);
-      ctx.beginPath(); ctx.arc(pointer.x, pointer.y, (player.radius + CONFIG.jump.clearance) * camera.zoom, 0, Math.PI * 2);
-      ctx.moveTo(screenX(player.x), screenY(player.y)); ctx.lineTo(pointer.x, pointer.y);
-      ctx.strokeStyle = clear ? "#91f3ce" : "#ff8b94"; ctx.lineWidth = 1; ctx.stroke();
-      ctx.restore();
-    }
     ctx.restore();
   }
 
@@ -1082,6 +1125,18 @@
     const percent = growth.total > 0 ? clamp(growth.value / growth.total * 100, 0, 100) : 0;
     SolarLanguage.text(ui.stage, type.name); ui["stage-dot"].style.background = type.color; ui["stage-dot"].style.color = type.color;
     SolarLanguage.text(ui.mass, player.mass.toFixed(1)); SolarLanguage.text(ui.speed, Math.hypot(player.vx, player.vy).toFixed(1));
+    // 结构完整度只受战斗损伤和补充质量影响，供养不消耗完整度。
+    const integrity = clamp(player.integrity * 100, 0, 100);
+    const breakPoint = (1 - CONFIG.combat.breakLoss) * 100;
+    const healthMeter = document.getElementById("mass-health-meter");
+    healthMeter.setAttribute("aria-valuenow", integrity.toFixed(1));
+    healthMeter.style.setProperty("--break-point", breakPoint + "%");
+    const healthFill = document.getElementById("mass-health-fill");
+    healthFill.style.width = integrity + "%";
+    healthFill.style.background = integrity <= breakPoint + 10 ? "#ff6575" : integrity <= breakPoint + 25 ? "#e5b65f" : "#62dcc9";
+    SolarLanguage.text(document.getElementById("mass-health-value"), integrity.toFixed(1) + "%");
+    SolarLanguage.text(document.getElementById("mass-health-threshold"), `Breaks below ${breakPoint.toFixed(0)}%`);
+    SolarLanguage.text(document.getElementById("mass-health-total"), `${bodyMass(player).toFixed(1)}`);
     const format = n => Math.floor(n).toLocaleString();
     SolarLanguage.text(document.getElementById("drift-distance"), `${format(driftDistance)} km`);
     SolarLanguage.text(document.getElementById("drift-time"), `${format(time)} years`);
@@ -1096,8 +1151,14 @@
     document.getElementById("hazard-warning-row").hidden = warnings.length === 0;
     SolarLanguage.text(document.getElementById("hazard-warning"), warnings.map(w => `${w.imminent ? "Danger" : "Nearby"} · ${TYPES[w.body.type].name} ${Math.floor(w.distance)} km`).join("; "));
     document.getElementById("hazard-warning").style.color = warnings.some(w => w.imminent) ? "#ff6575" : "#ffc375";
-    SolarLanguage.text(document.getElementById("life-stat"), `${format(c.population)} / ${format(CIV.capacity(player))}`);
-    SolarLanguage.text(document.getElementById("tech-stat"), `${c.tech}`);
+    SolarLanguage.text(document.getElementById("life-stat"), `${(c.population / 1e6).toFixed(1)} M`);
+    SolarLanguage.text(document.getElementById("tech-stat"), `${c.tech} / ${c.knowledge}`);
+    SolarLanguage.text(document.getElementById("supply-stat"), `${(CIV.capacity(player) / 1e6).toFixed(1)} M · ${c.pressure.toFixed(2)}×`);
+    SolarLanguage.text(document.getElementById("upkeep-stat"), `${c.consumption.toFixed(2)} / s`);
+    const fleetStatus = fleets.summary(player, time);
+    SolarLanguage.text(document.getElementById("fleet-stat"), `${fleetStatus.away} / ${fleetStatus.total}`);
+    SolarLanguage.text(document.getElementById("recall-stat"), fleetStatus.recall > 0 ? `${fleetStatus.recall} s` : "Ready");
+    document.getElementById("fleet-actions").hidden = ended || paused || choosingStart || c.tech < 3;
     SolarLanguage.text(document.getElementById("shield-stat"), `${c.shield.toFixed(1)} / ${CIV.stats(player).shield}`);
     SolarLanguage.text(document.getElementById("city-stat"), player.cityMass.toFixed(1));
     document.getElementById("city-row").hidden = player.cityMass <= 0 && !c.city;
@@ -1114,7 +1175,7 @@
 
   function togglePause() {
     if (ended || choosingStart) return;
-    paused = !paused; accumulator = 0; jumping = false; clearMovement();
+    paused = !paused; accumulator = 0; clearMovement();
     if (paused) ui["pause-screen"].showModal();
     else { ui["pause-screen"].close(); ui.pause.blur(); }
     refreshHud();
@@ -1140,7 +1201,7 @@
   }
   canvas.addEventListener("pointerdown", event => {
     pointer = { x: event.clientX, y: event.clientY };
-    if (event.button === 2) { jumping = false; return; }
+    if (event.button === 2) return;
     if (event.button !== 0 || ended || paused || choosingStart) return;
     if (event.pointerType === "touch") {
       event.preventDefault();
@@ -1152,11 +1213,6 @@
         pinchDistance = Math.hypot(a.x - b.x, a.y - b.y);
         return;
       }
-    }
-    if (jumping) {
-      const target = jumpTarget();
-      performJump(player, target.x, target.y);
-      refreshHud(); return;
     }
     let satellite = null, nearest = Infinity;
     for (const b of bodies) {
@@ -1197,11 +1253,11 @@
   canvas.addEventListener("pointerup", releaseTouch);
   canvas.addEventListener("pointercancel", releaseTouch);
   canvas.addEventListener("lostpointercapture", releaseTouch);
-  canvas.addEventListener("contextmenu", event => { event.preventDefault(); jumping = false; });
+  canvas.addEventListener("contextmenu", event => { event.preventDefault(); });
   canvas.addEventListener("wheel", event => { event.preventDefault(); camera.targetZoom = clamp(camera.targetZoom * Math.exp(-event.deltaY * .001), .5, 2.5); }, { passive: false });
   ui.pause.addEventListener("click", togglePause);
   document.getElementById("touch-pause").addEventListener("click", togglePause);
-  document.getElementById("touch-jump").addEventListener("click", toggleJump);
+  document.getElementById("recall-fleet").addEventListener("click", recallFleet);
   document.getElementById("touch-trail").addEventListener("click", toggleOrbits);
   document.getElementById("load-save").addEventListener("click", () => {
     readSave();
@@ -1219,7 +1275,7 @@
     SolarLanguage.text(document.getElementById("start-summary"), `${type.name} · Mass ${index === 0 ? 8 : type.min} · Room for ${satelliteLimit(index)} moons`);
   }
   function openStartSelection() {
-    choosingStart = true; accumulator = 0; jumping = false; clearMovement();
+    choosingStart = true; accumulator = 0; clearMovement();
     ui["end-screen"].hidden = true;
     selectedSatelliteId = null; satelliteClickAt = -Infinity;
     ui["pause-screen"].close();
@@ -1244,8 +1300,7 @@
       return;
     }
     if (event.repeat) return;
-    if (event.code === "KeyT") { event.preventDefault(); toggleJump(); return; }
-    if (event.code === "Escape" && jumping) { event.preventDefault(); jumping = false; return; }
+    if (event.code === "KeyR") { event.preventDefault(); recallFleet(); return; }
     if (event.code === "KeyK") { event.preventDefault(); cycleSatellite(); return; }
     if (event.code === "KeyL") { event.preventDefault(); absorbSelectedSatellite(); return; }
     if (event.code === "Space") { event.preventDefault(); togglePause(); return; }
@@ -1264,10 +1319,8 @@
     const dt = lastFrame ? Math.min((timestamp - lastFrame) / 1000, .06) : 0;
     lastFrame = timestamp;
     document.getElementById("touch-actions").hidden = choosingStart || ended || paused;
-    document.getElementById("touch-jump").disabled = !player || !player.civ.city || player.civ.tech < 4 || time < player.jumpReady;
-    document.getElementById("touch-jump").setAttribute("aria-pressed", String(jumping));
+    document.getElementById("fleet-actions").hidden = choosingStart || ended || paused || !player || player.civ.tech < 3;
     document.getElementById("touch-trail").setAttribute("aria-pressed", String(showTrails));
-    document.getElementById("rotate-hint").hidden = !touchLayout.matches || width >= height;
     if (!choosingStart && !paused && !ended) {
       updateTouchThrust();
       accumulator += dt;
@@ -1287,7 +1340,7 @@
     const entry = document.createElement("span");
     entry.style.setProperty("--color", type.color);
     SolarLanguage.text(entry, type.name);
-    SolarLanguage.attribute(entry, "title", `${type.natural ? `Natural body · Mass ${type.mass} · Cannot be captured or destroyed` : `Mass ≥ ${type.min} · Tech cap ${type.techCap} · Satellite cap ${satelliteLimit(TYPES.indexOf(type))}`} · Gravity reach ${type.gravityRange} km`);
+    SolarLanguage.attribute(entry, "title", `${type.natural ? `Natural body · Mass ${type.mass} · ${type.kind === "black-hole" ? "Cannot be captured or mined" : "Cannot be captured; technology 7 can mine it"}` : `Mass ≥ ${type.min} · Satellite cap ${satelliteLimit(TYPES.indexOf(type))}`} · Gravity reach ${type.gravityRange} km`);
     legend.append(entry);
     if (type.natural) continue;
     const index = TYPES.indexOf(type);
@@ -1302,7 +1355,7 @@
   const flavorLines = [
     "The asteroid you just swallowed was their shooting star last night.",
     "They called your last sharp turn the Great Migration.",
-    "After the first jump, every astronomer filed for retirement.",
+    "The first supply ship returned. Dinner was no longer a theory.",
     "The day the shield went up, the doomsayers started looking for other work.",
     "That moon kept them company for three centuries. You needed a little more mass.",
     "The expensive apartments face the star. The cheap ones will shortly.",

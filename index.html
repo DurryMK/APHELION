@@ -8,25 +8,38 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <canvas id="universe" aria-label="Space game: WASD thrust, K select satellite, L absorb, T jump, Space pause"></canvas>
+  <canvas id="universe" aria-label="Space game: WASD thrust, K select satellite, L absorb, R recall, Space pause"></canvas>
   <div id="notice" role="status" aria-live="polite"></div>
+  <div class="flight-toolbar">
   <nav id="touch-actions" aria-label="Flight controls" hidden>
     <button id="touch-trail" type="button" aria-pressed="true">Trail</button>
-    <button id="touch-jump" type="button" aria-pressed="false">Jump</button>
     <button id="touch-pause" type="button">Quick guide</button>
   </nav>
-  <div id="rotate-hint" hidden>Rotate your device to landscape.</div>
+  <nav id="fleet-actions" aria-label="Fleet controls" hidden><button id="recall-fleet" type="button">Recall <kbd>R</kbd></button></nav>
+  </div>
   <p id="controls-hint"><span class="keyboard-only">Space — View controls</span><span class="touch-only">Hold to thrust · Release to drift</span></p>
   <aside id="flavor-text" aria-label="A thought from the cosmos"></aside>
   <header class="brand"><span class="brand-mark">✳</span><div class="english">APHELION</div></header>
   <section class="telemetry" aria-label="Body status">
     <div class="stage-line"><span id="stage-dot"></span><h1 id="stage">Dust</h1></div>
     <div class="stats"><div><label>Mass</label><strong id="mass">8.0</strong></div><div><label>Speed</label><strong id="speed">0.0</strong></div><div><label>Satellites</label><strong id="satellites">0</strong></div></div>
+    <div class="mass-health">
+      <div class="mass-health-label"><span>Structural integrity</span><span id="mass-health-value">100%</span></div>
+      <div id="mass-health-meter" class="mass-health-track" role="meter" aria-label="Structural integrity" aria-valuemin="0" aria-valuemax="100" aria-valuenow="100">
+        <i id="mass-health-fill"></i>
+        <span id="mass-health-marker" class="mass-health-marker"></span>
+      </div>
+      <div class="mass-health-caption"><span id="mass-health-threshold">Breaks below 30%</span><span id="mass-health-total"></span></div>
+    </div>
     <dl class="civilization-stats">
       <div><dt>Distance</dt><dd id="drift-distance">0 km</dd></div>
       <div><dt>Time</dt><dd id="drift-time">0 years</dd></div>
-      <div><dt>Population</dt><dd id="life-stat">0 / 0</dd></div>
-      <div><dt>Tech</dt><dd id="tech-stat">0</dd></div>
+      <div><dt>Population</dt><dd id="life-stat">0 M</dd></div>
+      <div><dt>Supply / pressure</dt><dd id="supply-stat">0 M</dd></div>
+      <div><dt>Upkeep</dt><dd id="upkeep-stat">0 / s</dd></div>
+      <div><dt>Ships away / total</dt><dd id="fleet-stat">0 / 0</dd></div>
+      <div><dt>Recall hold</dt><dd id="recall-stat">Ready</dd></div>
+      <div><dt>Active / learned</dt><dd id="tech-stat">0</dd></div>
       <div><dt>Shield</dt><dd id="shield-stat">0 / 0</dd></div>
       <div id="city-row" hidden><dt>City mass</dt><dd id="city-stat">0</dd></div>
       <div><dt>Kills</dt><dd id="kills-stat">0</dd></div>
@@ -37,22 +50,28 @@
   </section>
   <dialog id="pause-screen" aria-labelledby="pause-title">
     <h2 id="pause-title">Quick guide</h2>
-    <p class="portrait-note">Rotate your device to landscape.</p>
     <section class="guide-section">
       <h3>Celestial bodies</h3>
       <p>Dust merges on gentle contact. Planets grow by capturing and absorbing asteroids.</p>
-      <p>More mass supports more life. Sol, Pulsar and Void are natural hazards.</p>
+      <p>Life begins at 10 M. Population grows toward the mass your world can support; overcrowding slows research and reduces population.</p>
+      <p>Upkeep never breaks your world. Combat integrity below 30% is fatal; fresh mass helps repair it.</p>
+      <p>Sol and Pulsar can be mined at technology 7. Void cannot be mined.</p>
       <div id="type-legend" class="legend" aria-label="Celestial bodies"></div>
     </section>
     <section class="guide-section">
       <h3>Technology levels</h3>
-      <ol class="tech-guide">
+      <ol class="tech-guide" start="0">
+        <li>Incubation · Life takes 30 seconds to emerge.</li>
         <li>Shield · Protects your world.</li>
-        <li>Lasers · Defend against nearby enemies.</li>
-        <li>Artificial moons · Stronger, longer-range firepower.</li>
-        <li>Space city · More living space and spatial jumps.</li>
-        <li>Harvesting · Absorb half the remaining mass of planets destroyed by your lasers.</li>
+        <li>Point defense · Slow, heavy shots against close threats.</li>
+        <li>One carrier · Three ships for combat and transport.</li>
+        <li>Three carriers · Four ships each, with greater reach.</li>
+        <li>Space city · Stronger shields, more living space and faster ship production.</li>
+        <li>Double city · No population cap; stronger ships and larger cargo holds.</li>
+        <li>Stellar mining · Harvest mass from Sol and Pulsar.</li>
       </ol>
+      <p>Ships mine asteroids and unshielded planets. Shields must be broken first. Cargo only becomes yours after unloading.</p>
+      <p>Ships need ammunition and life support. Recall before accelerating; ships that cannot return are lost.</p>
     </section>
     <section class="guide-section">
       <h3>Controls</h3>
@@ -60,11 +79,11 @@
         <dt class="touch-only">Hold</dt><dd class="touch-only">Hold open space to thrust; release to drift.</dd>
         <dt class="touch-only">Double-tap</dt><dd class="touch-only">Absorb a captured moon.</dd>
         <dt class="touch-only">Pinch</dt><dd class="touch-only">Zoom the view.</dd>
-        <dt class="touch-only">Jump</dt><dd class="touch-only">Tap Jump, then tap open space. Tap Jump again to cancel.</dd>
+        <dt class="touch-only">Recall</dt><dd class="touch-only">Return all ships; hold departures for 10 seconds.</dd>
         <dt class="keyboard-only">WASD</dt><dd class="keyboard-only">Thrust; reverse to brake.</dd>
         <dt class="keyboard-only">K / L</dt><dd class="keyboard-only">Select / absorb a captured moon.</dd>
         <dt class="keyboard-only">Double-click</dt><dd class="keyboard-only">Absorb a captured moon.</dd>
-        <dt class="keyboard-only">T</dt><dd class="keyboard-only">Choose a jump destination; click to confirm, right-click / Esc to cancel.</dd>
+        <dt class="keyboard-only">R</dt><dd class="keyboard-only">Return all ships; hold departures for 10 seconds.</dd>
         <dt class="keyboard-only">Wheel / O</dt><dd class="keyboard-only">Zoom / toggle trail.</dd>
         <dt class="keyboard-only">Space</dt><dd class="keyboard-only">View guide / resume.</dd>
       </dl>
@@ -83,7 +102,6 @@
       <label class="language-choice"><span lang="en">English</span><input class="language-switch" type="checkbox" role="switch" data-language aria-label="Use Chinese"><span lang="zh-CN">中文</span></label>
       <div class="eyebrow">CHOOSE YOUR ORIGIN</div>
       <h2 id="start-title">Choose your origin</h2>
-      <p class="portrait-note">Rotate your device to landscape.</p>
       <p>Choose a starting stage. Your civilization begins with new life.</p>
       <fieldset id="start-types"><legend>Starting body</legend></fieldset>
       <p id="start-summary" aria-live="polite"></p>
@@ -95,6 +113,7 @@
   <script src="config.js"></script>
   <script src="civilization.js"></script>
   <script src="gravity.js"></script>
+  <script src="fleet.js"></script>
   <script src="game.js"></script>
 </body>
 </html>
