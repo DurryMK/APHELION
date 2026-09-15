@@ -1135,8 +1135,6 @@
     healthFill.style.width = integrity + "%";
     healthFill.style.background = integrity <= breakPoint + 10 ? "#ff6575" : integrity <= breakPoint + 25 ? "#e5b65f" : "#62dcc9";
     SolarLanguage.text(document.getElementById("mass-health-value"), integrity.toFixed(1) + "%");
-    SolarLanguage.text(document.getElementById("mass-health-threshold"), `Breaks below ${breakPoint.toFixed(0)}%`);
-    SolarLanguage.text(document.getElementById("mass-health-total"), `${bodyMass(player).toFixed(1)}`);
     const format = n => Math.floor(n).toLocaleString();
     SolarLanguage.text(document.getElementById("drift-distance"), `${format(driftDistance)} km`);
     SolarLanguage.text(document.getElementById("drift-time"), `${format(time)} years`);
@@ -1152,12 +1150,12 @@
     SolarLanguage.text(document.getElementById("hazard-warning"), warnings.map(w => `${w.imminent ? "Danger" : "Nearby"} · ${TYPES[w.body.type].name} ${Math.floor(w.distance)} km`).join("; "));
     document.getElementById("hazard-warning").style.color = warnings.some(w => w.imminent) ? "#ff6575" : "#ffc375";
     SolarLanguage.text(document.getElementById("life-stat"), `${(c.population / 1e6).toFixed(1)} M`);
-    SolarLanguage.text(document.getElementById("tech-stat"), `${c.tech} / ${c.knowledge}`);
-    SolarLanguage.text(document.getElementById("supply-stat"), `${(CIV.capacity(player) / 1e6).toFixed(1)} M · ${c.pressure.toFixed(2)}×`);
-    SolarLanguage.text(document.getElementById("upkeep-stat"), `${c.consumption.toFixed(2)} / s`);
+    const supportedPopulation = CIV.capacity(player);
+    document.getElementById("life-stat").classList.toggle("overcrowded", c.population > supportedPopulation);
+    SolarLanguage.text(document.getElementById("tech-stat"), `${c.tech}`);
+    SolarLanguage.text(document.getElementById("upkeep-stat"), `${c.consumption.toFixed(2)} mass/year`);
     const fleetStatus = fleets.summary(player, time);
-    SolarLanguage.text(document.getElementById("fleet-stat"), `${fleetStatus.away} / ${fleetStatus.total}`);
-    SolarLanguage.text(document.getElementById("recall-stat"), fleetStatus.recall > 0 ? `${fleetStatus.recall} s` : "Ready");
+    SolarLanguage.text(document.getElementById("fleet-stat"), `${fleetStatus.mothers} / ${fleetStatus.total}`);
     document.getElementById("fleet-actions").hidden = ended || paused || choosingStart || c.tech < 3;
     SolarLanguage.text(document.getElementById("shield-stat"), `${c.shield.toFixed(1)} / ${CIV.stats(player).shield}`);
     SolarLanguage.text(document.getElementById("city-stat"), player.cityMass.toFixed(1));
