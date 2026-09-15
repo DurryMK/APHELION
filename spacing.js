@@ -3,14 +3,14 @@
 globalThis.SolarSpacing = {
   radius(unit) {
     if (unit.entity === "mothership") return Math.max(unit.radius, 18);
-    return unit.radius + (unit.civ?.city ? unit.civ.tech >= 6 ? 19 : 12 : unit.civ?.shield > 0 ? 4 : 0);
+    return unit.entity ? unit.radius : SolarCivilization.collisionRadius(unit);
   },
   // 接触伤害由天体碰撞处理；空间约束仅分离实体，不施加引力。
   resolve(all) {
     const units = all.filter(u => u.alive && u.mode !== "dock");
     const shift = (unit, x, y) => {
       unit.x += x; unit.y += y;
-      if (unit.entity === "carrier") {
+      if (unit.entity === "carrier" || unit.entity === "gun") {
         unit.orbitMotion.x += x; unit.orbitMotion.y += y;
       }
     };
@@ -23,7 +23,7 @@ globalThis.SolarSpacing = {
           if (!bucket) continue;
           for (const other of bucket) {
             const celestial = !unit.entity && !other.entity;
-            const minimum = celestial ? unit.radius + other.radius : this.radius(unit) + this.radius(other) + 3;
+            const minimum = this.radius(unit) + this.radius(other) + (celestial ? 0 : 3);
             const dx = unit.x - other.x, dy = unit.y - other.y, distance = Math.hypot(dx, dy);
             if (distance >= minimum) continue;
             const angle = (unit.id + other.id) * 2.4;
