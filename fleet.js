@@ -2,6 +2,17 @@
 
 // 轨道设施和飞船不进入天体引力与碰撞列表。
 globalThis.SolarFleet = {
+  steer(ship, target, speed, acceleration, response, stop, dt) {
+    const dx = target.x - ship.x, dy = target.y - ship.y, length = Math.hypot(dx, dy);
+    const closing = Math.max(-speed, Math.min(speed, (length - stop) * response));
+    let vx = target.vx + (length > 0 ? dx / length * closing : 0);
+    let vy = target.vy + (length > 0 ? dy / length * closing : 0);
+    const desiredSpeed = Math.hypot(vx, vy);
+    if (desiredSpeed > speed) { vx *= speed / desiredSpeed; vy *= speed / desiredSpeed; }
+    const changeX = vx - ship.vx, changeY = vy - ship.vy, change = Math.hypot(changeX, changeY);
+    const fraction = change > 0 ? Math.min(1, acceleration * dt / change) : 0;
+    ship.vx += changeX * fraction; ship.vy += changeY * fraction;
+  },
   create(context) {
     const cfg = SolarConfig.fleet, CIV = SolarCivilization;
     const groups = new Map();
@@ -59,9 +70,13 @@ globalThis.SolarFleet = {
       return Math.max(0, (.85 - ratio) / .25 * .4);
     }
     function makeCarrier(owner, slot, now) {
+      const orbit = owner.radius + (owner.civ.tech >= 6 ? 36 : owner.civ.city ? 25 : 20);
+      const angle = now * cfg.carrierOrbitSpeed + owner.phase + slot * Math.PI * 2 / grade(owner).mothers;
+      const x = Math.cos(angle) * orbit, y = Math.sin(angle) * orbit;
       return { id: context.id(), entity: "carrier", ownerId: owner.id, owner, slot,
-        x: owner.x, y: owner.y, vx: owner.vx, vy: owner.vy, radius: 6, alive: true,
-        nextBuild: now + grade(owner).production, nextLaunch: now };
+        x: owner.x + x, y: owner.y + y, vx: owner.vx, vy: owner.vy, radius: 6, alive: true,
+        nextBuild: now + grade(owner).production, nextLaunch: now,
+        orbitMotion: { x, y, vx: -y * cfg.carrierOrbitSpeed, vy: x * cfg.carrierOrbitSpeed } };
     }
     function sync(now) {
       const bodies = context.bodies();
@@ -72,7 +87,10 @@ globalThis.SolarFleet = {
       if (player.alive && player.civ.tech >= 3) chosen.push(player);
       const active = new Set(chosen.map(b => b.id));
       const live = new Set(bodies.filter(b => b.alive).map(b => b.id));
-      for (const owner of chosen) if (!groups.has(owner.id)) groups.set(owner.id, { owner, mothers: [], planes: [], enabled: true });
+      for (const owner of chosen) if (!groups.has(owner.id)) groups.set(owner.id, {
+        owner, mothers: [], planes: [], enabled: true, stableSince: now,
+        motionAt: now, lastVx: owner.vx, lastVy: owner.vy
+      });
       for (const [id, group] of groups) {
         const owner = group.owner;
         if (!live.has(id) || owner.civ.tech < 3) {
@@ -121,9 +139,9 @@ globalThis.SolarFleet = {
       const base = plane.mother;
       const home = { x: base.x + base.vx * outward, y: base.y + base.vy * outward, vx: base.vx, vy: base.vy };
       const returning = intercept(future, home, spec.speed);
-      return outward + returning + spec.cargo / spec.mining + Math.max(8, spec.endurance * .2) < spec.endurance;
+      return outward + returning + spec.speed / cfg.acceleration * 2 + spec.cargo / spec.mining + Math.max(8, spec.endurance * .2) < spec.endurance;
     }
-    function chooseTarget(plane, group, now) {
+    function chooseTarget(plane, group, now, combatOnly = false) {
       const owner = group.owner, spec = grade(owner);
       const reservations = new Map();
       for (const p of group.planes) if (p !== plane && p.alive && p.target) reservations.set(p.target.id, (reservations.get(p.target.id) || 0) + 1);
@@ -131,7 +149,7 @@ globalThis.SolarFleet = {
       for (const target of nearby(owner, spec.range)) {
         if (!target.alive || distance(target, owner) > spec.range || own(owner, target)) continue;
         const hostile = enemy(owner, target), resource = mineable(owner, target);
-        if (!hostile && !resource || !safeMission(plane, target, spec)) continue;
+        if (combatOnly && !hostile || !hostile && !resource || !safeMission(plane, target, spec)) continue;
         const rank = hostile ? target.entity === "mothership" ? 0 : target.entity ? 1 : 2 : 3;
         const value = rank * 100000 + (reservations.get(target.id) || 0) * 500 + distance(plane, target) - (plane.target === target ? 250 : 0);
         if (value < score) { score = value; result = target; }
@@ -148,6 +166,14 @@ globalThis.SolarFleet = {
           continue;
         }
         const owner = group.owner, spec = grade(owner), rate = launchRate(owner, spec);
+        const elapsed = now - group.motionAt;
+        if (elapsed > 0 && Math.hypot(owner.vx - group.lastVx, owner.vy - group.lastVy) / elapsed > cfg.stableAcceleration) group.stableSince = now;
+        group.motionAt = now; group.lastVx = owner.vx; group.lastVy = owner.vy;
+        const stable = now - group.stableSince >= cfg.stableSeconds && Math.hypot(owner.vx, owner.vy) < spec.speed * .7;
+        const patrolLimit = stable && group.enabled && now >= owner.recallUntil ? Math.floor(group.planes.filter(p => p.alive).length * cfg.patrolRatio) : 0;
+        const patrols = group.planes.filter(p => p.alive && p.patrol && p.mode !== "dock");
+        for (const plane of patrols.slice(patrolLimit)) { plane.mode = "return"; plane.target = null; }
+        let patrolCount = patrols.length;
         for (const mother of group.mothers) {
           if (!group.enabled || now < mother.nextBuild) continue;
           if (group.planes.filter(p => p.alive && p.mother === mother).length >= spec.perMother) continue;
@@ -157,7 +183,7 @@ globalThis.SolarFleet = {
             x: mother.x, y: mother.y, vx: 0, vy: 0, radius: owner.civ.tech >= 6 ? 3 : 2.5,
             hp: spec.hp, maxHp: spec.hp, alive: true, mode: "dock", readyAt: now + spec.supply,
             shots: spec.ammo, cargo: 0, departed: now, expires: now, nextAttack: now,
-            nextSearch: now + (mother.slot * .13), target: null, retiring: false };
+            nextSearch: now + (mother.slot * .13), target: null, retiring: false, patrol: false };
           group.planes.push(plane); units.push(plane); mother.nextBuild = now + spec.production;
         }
         for (const plane of group.planes) {
@@ -169,9 +195,14 @@ globalThis.SolarFleet = {
             if (now < plane.readyAt) continue;
             plane.hp = spec.hp; plane.shots = spec.ammo;
             if (!group.enabled || now < owner.recallUntil || rate <= 0 || now < mother.nextLaunch || now < plane.nextSearch) continue;
-            chooseTarget(plane, group, now);
-            if (!plane.target) continue;
-            plane.mode = enemy(owner, plane.target) ? "attack" : "mine";
+            plane.patrol = patrolCount < patrolLimit;
+            if (plane.patrol) {
+              patrolCount++; plane.mode = "patrol"; plane.target = null;
+            } else {
+              chooseTarget(plane, group, now);
+              if (!plane.target) continue;
+              plane.mode = enemy(owner, plane.target) ? "attack" : "mine";
+            }
             plane.departed = now; plane.expires = now + spec.endurance;
             mother.nextLaunch = now + 1 / rate;
           } else {
@@ -185,8 +216,9 @@ globalThis.SolarFleet = {
           }
           if (plane.mode === "return" || plane.mode === "dock") continue;
           if (!plane.target?.alive || distance(plane.target, owner) > spec.range) plane.target = null;
-          if (now >= plane.nextSearch) chooseTarget(plane, group, now);
-          if (!plane.target) { plane.mode = "return"; continue; }
+          if (plane.patrol && plane.target && !enemy(owner, plane.target)) plane.target = null;
+          if (now >= plane.nextSearch) chooseTarget(plane, group, now, plane.patrol);
+          if (!plane.target) { plane.mode = plane.patrol ? "patrol" : "return"; continue; }
           const target = plane.target, d = distance(plane, target);
           if (enemy(owner, target)) {
             plane.mode = "attack";
@@ -196,7 +228,7 @@ globalThis.SolarFleet = {
             }
           } else if (mineable(owner, target)) {
             plane.mode = "mine";
-            const standOff = target.natural ? SolarConfig.types[target.type].hazardRange + 8 : target.radius + 5;
+            const standOff = target.natural ? SolarConfig.types[target.type].hazardRange + 8 : SolarSpacing.radius(target) + plane.radius + 5;
             if (d <= standOff + 3) {
               const fraction = target.natural ? target.type === 9 ? .25 : .5 : 1;
               plane.cargo += context.harvest(target, Math.min(Math.max(0, spec.cargo - plane.cargo), spec.mining * fraction * cfg.decisionInterval), owner, now);
@@ -216,10 +248,14 @@ globalThis.SolarFleet = {
         const owner = group.owner, spec = grade(owner);
         for (const mother of group.mothers) {
           const orbit = owner.radius + (owner.civ.tech >= 6 ? 36 : owner.civ.city ? 25 : 20);
-          const angle = now * .12 + owner.phase + mother.slot * Math.PI * 2 / group.mothers.length;
-          mother.x = owner.x + Math.cos(angle) * orbit; mother.y = owner.y + Math.sin(angle) * orbit;
-          mother.vx = owner.vx - Math.sin(angle) * orbit * .12;
-          mother.vy = owner.vy + Math.cos(angle) * orbit * .12;
+          const angle = now * cfg.carrierOrbitSpeed + owner.phase + mother.slot * Math.PI * 2 / group.mothers.length;
+          const orbitalTarget = { x: Math.cos(angle) * orbit, y: Math.sin(angle) * orbit,
+            vx: -Math.sin(angle) * orbit * cfg.carrierOrbitSpeed, vy: Math.cos(angle) * orbit * cfg.carrierOrbitSpeed };
+          // 轨道母舰在主星参考系内缓慢加速，整体平移仍随主星运行。
+          SolarFleet.steer(mother.orbitMotion, orbitalTarget, spec.speed * .25, cfg.acceleration * .5, cfg.steering, 0, dt);
+          mother.orbitMotion.x += mother.orbitMotion.vx * dt; mother.orbitMotion.y += mother.orbitMotion.vy * dt;
+          mother.x = owner.x + mother.orbitMotion.x; mother.y = owner.y + mother.orbitMotion.y;
+          mother.vx = owner.vx + mother.orbitMotion.vx; mother.vy = owner.vy + mother.orbitMotion.vy;
         }
         for (const plane of group.planes) {
           if (!plane.alive) continue;
@@ -227,19 +263,23 @@ globalThis.SolarFleet = {
             plane.x = plane.mother.x; plane.y = plane.mother.y; plane.vx = plane.mother.vx; plane.vy = plane.mother.vy; continue;
           }
           if (now >= plane.expires) { context.destroy(plane, null, "endurance"); continue; }
-          const target = plane.mode === "return" ? plane.mother : plane.target;
+          let target = plane.mode === "return" ? plane.mother : plane.target;
+          if (plane.mode === "patrol") {
+            const angle = now * cfg.patrolOrbitSpeed + plane.id * 2.4, orbit = spec.range * cfg.patrolRangeRatio;
+            target = { alive: true, x: owner.x + Math.cos(angle) * orbit, y: owner.y + Math.sin(angle) * orbit,
+              vx: owner.vx - Math.sin(angle) * orbit * cfg.patrolOrbitSpeed,
+              vy: owner.vy + Math.cos(angle) * orbit * cfg.patrolOrbitSpeed };
+          }
           if (!target?.alive) { plane.mode = "return"; plane.target = null; continue; }
-          const d = distance(plane, target);
-          const stop = plane.mode === "return" ? 2 : plane.mode === "mine" ?
-            target.natural ? SolarConfig.types[target.type].hazardRange + 8 : target.radius + 5 : spec.attackRange * .65;
-          const travel = Math.min(spec.speed * dt, Math.max(0, d - stop));
-          const dx = target.x - plane.x, dy = target.y - plane.y;
-          plane.vx = d > 0 ? dx / d * travel / dt : 0;
-          plane.vy = d > 0 ? dy / d * travel / dt : 0;
+          const stop = plane.mode === "patrol" ? 0 : plane.mode === "return" ? target.radius + plane.radius + 3 : plane.mode === "mine" ?
+            target.natural ? SolarConfig.types[target.type].hazardRange + 8 : SolarSpacing.radius(target) + plane.radius + 5 :
+            Math.max(SolarSpacing.radius(target) + plane.radius + 8, spec.attackRange * .65);
+          SolarFleet.steer(plane, target, spec.speed, cfg.acceleration, cfg.steering, stop, dt);
           plane.x += plane.vx * dt; plane.y += plane.vy * dt;
-          if (plane.mode === "return" && distance(plane, plane.mother) <= plane.mother.radius + 2) {
+          if (plane.mode === "return" && distance(plane, plane.mother) <= plane.mother.radius + plane.radius + 5 &&
+              Math.hypot(plane.vx - plane.mother.vx, plane.vy - plane.mother.vy) < spec.speed * .35) {
             if (plane.cargo > 0) context.gain(owner, plane.cargo);
-            plane.cargo = 0; plane.mode = "dock"; plane.target = null; plane.readyAt = now + spec.supply;
+            plane.cargo = 0; plane.mode = "dock"; plane.target = null; plane.patrol = false; plane.readyAt = now + spec.supply;
           }
         }
       }

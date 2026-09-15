@@ -33,13 +33,13 @@
     <dl class="civilization-stats">
       <div><dt>Distance</dt><dd id="drift-distance">0 km</dd></div>
       <div><dt>Time</dt><dd id="drift-time">0 years</dd></div>
-      <div><dt>Population</dt><dd id="life-stat">0 M</dd></div>
+      <div><dt>Population</dt><dd id="life-stat"><span id="life-value">0 M</span> <span id="life-trend"></span></dd></div>
       <div><dt>Upkeep</dt><dd id="upkeep-stat">0 mass/year</dd></div>
       <div><dt>Carriers / ships</dt><dd id="fleet-stat">0 / 0</dd></div>
       <div><dt>Tech level</dt><dd id="tech-stat">0</dd></div>
       <div><dt>Shield</dt><dd id="shield-stat">0 / 0</dd></div>
       <div id="city-row" hidden><dt>City mass</dt><dd id="city-stat">0</dd></div>
-      <div><dt>Kills</dt><dd id="kills-stat">0</dd></div>
+      <div><dt>Battle record</dt><dd><span>Planets</span> <span id="planet-kills">0</span>; <span>Nests</span> <span id="nest-kills">0</span></dd></div>
       <div id="hazard-warning-row" hidden><dt>Warning</dt><dd id="hazard-warning"></dd></div>
     </dl>
     <div class="progress-label"><span id="next-stage">Incubating life</span><span id="progress-text">0%</span></div>
@@ -69,6 +69,7 @@
       </ol>
       <p>Ships mine asteroids and unshielded planets. Shields must be broken first. Cargo only becomes yours after unloading.</p>
       <p>Ships need ammunition and life support. Recall before accelerating; ships that cannot return are lost.</p>
+      <p>Steady flight keeps up to one third of your ships on patrol. Ships turn gradually and return to resupply.</p>
     </section>
     <section class="guide-section">
       <h3>Controls</h3>
@@ -110,6 +111,7 @@
   <script src="config.js"></script>
   <script src="civilization.js"></script>
   <script src="gravity.js"></script>
+  <script src="spacing.js"></script>
   <script src="fleet.js"></script>
   <script src="game.js"></script>
 </body>

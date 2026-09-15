@@ -84,7 +84,7 @@
 
   function createBody(x, y, mass, velocity = initialVelocity(mass), naturalType = null) {
     const { vx, vy } = velocity;
-    const body = { id: nextId++, x, y, px: x, py: y, vx, vy, ax: 0, ay: 0, mass, cityMass: 0, healthyMass: mass, integrity: 1, natural: naturalType !== null, type: naturalType, civ: CIV.create(), kills: { asteroid: 0, planet: 0, fighter: 0, mothership: 0 }, nextAttack: 0, nextAbsorb: 0, recallUntil: 0, hazardReady: 0, alive: true, trail: [], trailAt: 0, host: null, orbitRadius: 0, orbitDirection: 1, captureAfter: 0, cooldown: 0, phase: random(0, Math.PI * 2) };
+    const body = { id: nextId++, x, y, px: x, py: y, vx, vy, ax: 0, ay: 0, mass, cityMass: 0, healthyMass: mass, integrity: 1, natural: naturalType !== null, type: naturalType, civ: CIV.create(), kills: { planet: 0, mothership: 0 }, nextAttack: 0, nextAbsorb: 0, recallUntil: 0, hazardReady: 0, alive: true, trail: [], trailAt: 0, host: null, orbitRadius: 0, orbitDirection: 1, captureAfter: 0, cooldown: 0, phase: random(0, Math.PI * 2) };
     updateSize(body);
     bodies.push(body);
     return body;
@@ -323,8 +323,8 @@
     burst(target.x, target.y, target.entity ? "#ff6f72" : TYPES[target.type].color, 24, 45);
     const credited = attacker?.entity === "drone" ? attacker.owner : attacker;
     if (credited?.alive && !credited.entity && !credited.natural) {
-      const category = target.entity === "drone" ? "fighter" : target.entity || (wasPlanet ? "planet" : "asteroid");
-      credited.kills[category]++;
+      const category = target.entity === "mothership" ? "mothership" : wasPlanet ? "planet" : null;
+      if (category) credited.kills[category]++;
       if (category === "mothership") CIV.research(credited, CONFIG.civilization.mothershipResearchReward);
       if (credited === player && category === "mothership") announce("The nest has fallen silent");
     }
@@ -496,16 +496,21 @@
         continue;
       }
       if (ship.shots <= 0) ship.mode = mother?.alive ? "return" : "spent";
-      if (ship.mode === "spent") { ship.vx *= .9; ship.vy *= .9; continue; }
+      if (ship.mode === "spent") { const drag = Math.exp(-dt * .3); ship.vx *= drag; ship.vy *= drag; continue; }
       let target = ship.mode === "return" ? mother : nearestFleetTarget(ship, cfg.engagementRange);
-      if (!target && mother?.alive) target = { x: mother.x + Math.cos(time * .25 + ship.phase) * 65, y: mother.y + Math.sin(time * .25 + ship.phase) * 65 };
-      if (!target) { ship.vx *= .9; ship.vy *= .9; continue; }
+      if (Math.hypot(ship.x - mother.x, ship.y - mother.y) > cfg.activityRadius * .9) target = mother;
+      if (!target && mother?.alive) {
+        const angle = time * cfg.patrolOrbitSpeed + ship.phase;
+        target = { x: mother.x + Math.cos(angle) * cfg.patrolRadius, y: mother.y + Math.sin(angle) * cfg.patrolRadius,
+          vx: -Math.sin(angle) * cfg.patrolRadius * cfg.patrolOrbitSpeed,
+          vy: Math.cos(angle) * cfg.patrolRadius * cfg.patrolOrbitSpeed };
+      }
+      if (!target) { const drag = Math.exp(-dt * .3); ship.vx *= drag; ship.vy *= drag; continue; }
       const dx = target.x - ship.x, dy = target.y - ship.y, distance = Math.hypot(dx, dy);
-      const desired = ship.mode === "return" ? cfg.fighterSpeed : distance < cfg.range * .7 ? 0 : cfg.fighterSpeed;
-      const blend = 1 - Math.exp(-dt * 4);
-      ship.vx += ((distance ? dx / distance * desired : 0) - ship.vx) * blend;
-      ship.vy += ((distance ? dy / distance * desired : 0) - ship.vy) * blend;
-      if (ship.mode === "return" && distance < 20) { ship.mode = "dock"; ship.dockTime = cfg.resupplySeconds; ship.vx = 0; ship.vy = 0; }
+      const stop = ship.mode === "return" || target === mother ? SolarSpacing.radius(mother) + ship.radius + 3 :
+        target.civ || target.entity === "drone" ? Math.max(SolarSpacing.radius(target) + ship.radius + 8, cfg.range * .65) : 0;
+      SolarFleet.steer(ship, target, cfg.fighterSpeed, cfg.acceleration, cfg.steering, stop, dt);
+      if (ship.mode === "return" && distance < SolarSpacing.radius(mother) + ship.radius + 5 && Math.hypot(ship.vx, ship.vy) < cfg.fighterSpeed * .35) { ship.mode = "dock"; ship.dockTime = cfg.resupplySeconds; ship.vx = 0; ship.vy = 0; }
       else if (ship.mode === "attack" && (target.civ || target.entity === "drone") && distance < cfg.range && time >= ship.nextAttack) {
         fireLaser(ship, target, cfg.damage, "#ff526e"); ship.shots--; ship.nextAttack = time + cfg.interval;
         if (ship.shots === 0) ship.mode = mother?.alive ? "return" : "spent";
@@ -648,19 +653,8 @@
     if (ended) return;
     for (const ship of ships) if (ship.alive) {
       ship.x += ship.vx * dt; ship.y += ship.vy * dt;
-      if (ship.entity === "fighter") {
-        const mother = nestRecords.get(ship.mother);
-        const dx = ship.x - mother.x, dy = ship.y - mother.y, distance = Math.hypot(dx, dy);
-        if (distance > CONFIG.nests.activityRadius) {
-          const nx = dx / distance, ny = dy / distance;
-          ship.x = mother.x + nx * CONFIG.nests.activityRadius;
-          ship.y = mother.y + ny * CONFIG.nests.activityRadius;
-          // 活动边界移除向外速度，保留沿边界及返回母舰的运动。
-          const outward = Math.max(0, ship.vx * nx + ship.vy * ny);
-          ship.vx -= nx * outward; ship.vy -= ny * outward;
-        }
-      }
     }
+    SolarSpacing.resolve([...bodies, ...ships, ...fleets.units]);
     bodies = bodies.filter(b => b.alive);
     ships = ships.filter(s => s.alive);
     for (const beam of beams) beam.life -= dt;
@@ -755,7 +749,7 @@
       civ: { population: c.population, tech: c.tech, knowledge: c.knowledge, research: c.research, shield: c.shield,
         shortage: c.shortage, pressure: c.pressure, consumption: c.consumption,
         incubation: c.incubation, extinct: c.extinct, city: c.city, hitAgo: Math.min(10, time - c.lastHit) },
-      kills: { ...player.kills }
+      kills: { planet: player.kills.planet, mothership: player.kills.mothership }
     };
   }
 
@@ -763,7 +757,7 @@
     if (!s || s.version !== 2 || !s.civ || !s.kills) return false;
     const numeric = [s.savedAt, s.mass, s.cityMass, s.healthyMass, s.integrity, s.peakMass, s.absorbed, s.elapsed, s.distance, s.recallRemaining,
       s.civ.population, s.civ.tech, s.civ.knowledge, s.civ.research, s.civ.shield, s.civ.incubation, s.civ.hitAgo,
-      s.civ.shortage, s.civ.pressure, s.civ.consumption, s.kills.asteroid, s.kills.planet, s.kills.fighter, s.kills.mothership];
+      s.civ.shortage, s.civ.pressure, s.civ.consumption, s.kills.planet, s.kills.mothership];
     if (!numeric.every(n => typeof n === "number" && Number.isFinite(n) && n >= 0)) return false;
     if (s.mass < .6 || s.mass > CONFIG.maxPlanetMass || s.integrity < 1 - CONFIG.combat.breakLoss || s.integrity > 1) return false;
     if (![s.civ.tech, s.civ.knowledge].every(n => Number.isInteger(n) && n <= 7) || s.civ.tech > s.civ.knowledge) return false;
@@ -802,7 +796,7 @@
     driftDistance = snapshot.distance;
     player.civ = { ...snapshot.civ, lastHit: time - snapshot.civ.hitAgo };
     delete player.civ.hitAgo;
-    player.kills = { ...snapshot.kills };
+    player.kills = { planet: snapshot.kills.planet, mothership: snapshot.kills.mothership };
     player.recallUntil = time + snapshot.recallRemaining;
     nextPopulation = time + 2;
     updateSize(player);
@@ -1025,7 +1019,7 @@
   }
 
   function drawShip(ship) {
-    if (!ship.alive || ship.entity === "drone" && ship.mode === "dock") return;
+    if (!ship.alive || ship.mode === "dock") return;
     const x = screenX(ship.x), y = screenY(ship.y), r = ship.radius * camera.zoom;
     if (x < -30 || x > width + 30 || y < -30 || y > height + 30) return;
     ctx.save(); ctx.translate(x, y);
@@ -1119,6 +1113,7 @@
     ctx.restore();
   }
 
+  const populationTrends = new WeakMap();
   function refreshHud() {
     if (choosingStart) return;
     const type = TYPES[player.type], c = player.civ, growth = CIV.progress(player);
@@ -1149,7 +1144,16 @@
     document.getElementById("hazard-warning-row").hidden = warnings.length === 0;
     SolarLanguage.text(document.getElementById("hazard-warning"), warnings.map(w => `${w.imminent ? "Danger" : "Nearby"} · ${TYPES[w.body.type].name} ${Math.floor(w.distance)} km`).join("; "));
     document.getElementById("hazard-warning").style.color = warnings.some(w => w.imminent) ? "#ff6575" : "#ffc375";
-    SolarLanguage.text(document.getElementById("life-stat"), `${(c.population / 1e6).toFixed(1)} M`);
+    SolarLanguage.text(document.getElementById("life-value"), `${(c.population / 1e6).toFixed(1)} M`);
+    const previous = populationTrends.get(player);
+    const trend = previous || { population: c.population, direction: 0, at: time };
+    if (c.population !== trend.population) {
+      trend.direction = Math.sign(c.population - trend.population); trend.at = time;
+    } else if (time - trend.at > 1) trend.direction = 0;
+    trend.population = c.population; populationTrends.set(player, trend);
+    const arrow = document.getElementById("life-trend");
+    SolarLanguage.text(arrow, trend.direction > 0 ? "↑" : trend.direction < 0 ? "↓" : "");
+    arrow.className = trend.direction > 0 ? "rising" : trend.direction < 0 ? "falling" : "";
     const supportedPopulation = CIV.capacity(player);
     document.getElementById("life-stat").classList.toggle("overcrowded", c.population > supportedPopulation);
     SolarLanguage.text(document.getElementById("tech-stat"), `${c.tech}`);
@@ -1160,8 +1164,8 @@
     SolarLanguage.text(document.getElementById("shield-stat"), `${c.shield.toFixed(1)} / ${CIV.stats(player).shield}`);
     SolarLanguage.text(document.getElementById("city-stat"), player.cityMass.toFixed(1));
     document.getElementById("city-row").hidden = player.cityMass <= 0 && !c.city;
-    const totalKills = Object.values(player.kills).reduce((sum, n) => sum + n, 0);
-    SolarLanguage.text(document.getElementById("kills-stat"), format(totalKills));
+    SolarLanguage.text(document.getElementById("planet-kills"), format(player.kills.planet));
+    SolarLanguage.text(document.getElementById("nest-kills"), format(player.kills.mothership));
     const satellites = bodies.filter(b => b.alive && b.host === player.id);
     SolarLanguage.text(ui.satellites, `${satellites.length}/${satelliteLimit(player.type)}`);
     if (!satellites.some(b => b.id === selectedSatelliteId)) { selectedSatelliteId = null; satelliteClickAt = -Infinity; }
