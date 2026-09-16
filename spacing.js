@@ -7,7 +7,7 @@ globalThis.SolarSpacing = {
   },
   // 接触伤害由天体碰撞处理；空间约束仅分离实体，不施加引力。
   resolve(all) {
-    const units = all.filter(u => u.alive && u.mode !== "dock");
+    const units = all.filter(u => u.alive && u.mode !== "dock" && u.state !== "anchor");
     const shift = (unit, x, y) => {
       unit.x += x; unit.y += y;
       if (unit.entity === "carrier" || unit.entity === "gun") {

@@ -91,18 +91,23 @@ globalThis.SolarArtifacts = (() => {
     for (const mother of mothers) {
       const planes = artifacts.filter(unit => unit.entity === "drone" && unit.mother === mother).sort((a, b) => a.id - b.id);
       planes.forEach((plane, index) => {
-        let status = { dock: "Docked", patrol: "Patrolling", attack: "Attacking", mine: "Harvesting", return: "Returning" }[plane.mode];
+        let status = { dock: "Docked", patrol: "Patrolling", attack: "Attacking", return: "Returning" }[plane.mode];
         if (plane.mode === "dock") {
           if (plane.hp < plane.maxHp) status = now - plane.lastHit < cfg.repair.delay ? "Repair pending" : condition(plane);
           else if (now < plane.readyAt) status = "Resupplying";
         } else if (now - plane.lastHit < cfg.repair.delay) status = "Under fire · " + status;
-        const details = `Ammo ${plane.shots} / ${spec.ammo} · Cargo ${plane.cargo.toFixed(1)} / ${spec.cargo}` +
+        const details = `Ammo ${plane.shots} / ${spec.ammo}` +
           (plane.mode === "dock" ? "" : ` · Endurance ${Math.max(0, Math.ceil(plane.expires - now))} s`);
         add("ship" + plane.id, `Ship ${mother.slot + 1}.${index + 1}`, status, plane.hp, plane.maxHp, false, details);
       });
       if (planes.length < spec.perMother) add("production" + mother.id, `Carrier ${mother.slot + 1} · Ship`,
         buildState(true), mother.buildProgress, 1, true);
     }
+    const devourers = artifacts.filter(unit => unit.entity === "devourer").sort((a, b) => a.id - b.id);
+    devourers.forEach((unit, index) => {
+      const status = { orbit: "Patrolling", travel: "Deploying", anchor: "Devouring", return: "Recovering" }[unit.state] || "Operational";
+      add("devourer" + unit.id, `Devourer ship ${index + 1}`, status, unit.hp, unit.maxHp);
+    });
     // 删除失效行时同时释放语言绑定，避免长期游戏积累节点。
     for (const [key, entry] of rows) if (!entry.seen) {
       for (const node of [entry.name, entry.status, entry.label, entry.value, entry.extra]) language.forget(node);

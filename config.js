@@ -58,8 +58,8 @@ globalThis.SolarConfig = {
     mothershipResearchReward: 8
   },
   fleet: {
-    construction: { shield: 60, gun: 25, carrier: 40, city: 90, maxSpeed: 4,
-      cost: { gun: 8, carrier: 20, city: [40, 80] }, cityHp: [200, 350] },
+    construction: { shield: 60, gun: 25, carrier: 40, city: 90, devour: 70, maxSpeed: 4,
+      cost: { gun: 8, carrier: 20, city: [40, 80], devour: 45 }, cityHp: [200, 350] },
     repair: { delay: 5, fraction: .03, dockedFraction: .15, fullCostRatio: .6 },
     gunLimit: 3, gunHp: 100, carrierHp: 180, threatMemory: 5,
     decisionInterval: .2, searchInterval: .8, recallSeconds: 10, activeCivilizations: 5,
@@ -67,11 +67,19 @@ globalThis.SolarConfig = {
     steering: 1.8, acceleration: 48, carrierOrbitSpeed: .07,
     patrolRatio: 1 / 3, patrolRangeRatio: .35, patrolOrbitSpeed: .1, stableSeconds: 4, stableAcceleration: 4,
     grades: [
-      { mothers: 1, perMother: 3, hp: 12, damage: 1, interval: .4, ammo: 20, range: 260, attackRange: 65, cargo: 4, mining: 1, speed: 65, supply: 3, production: 12, cost: 1, endurance: 45 },
-      { mothers: 3, perMother: 4, hp: 16, damage: 1.2, interval: .4, ammo: 24, range: 360, attackRange: 75, cargo: 8, mining: 2, speed: 80, supply: 3, production: 11, cost: 1.5, endurance: 55 },
-      { mothers: 3, perMother: 4, hp: 20, damage: 1.5, interval: .35, ammo: 30, range: 440, attackRange: 85, cargo: 12, mining: 3, speed: 95, supply: 2, production: 10, cost: 2, endurance: 65 },
-      { mothers: 3, perMother: 4, hp: 36, damage: 2.5, interval: .3, ammo: 40, range: 600, attackRange: 95, cargo: 24, mining: 6, speed: 115, supply: 1.5, production: 9, cost: 3, endurance: 80 }
-    ]
+      { mothers: 1, perMother: 3, hp: 12, damage: 1, interval: .4, ammo: 20, range: 260, attackRange: 65, speed: 65, supply: 3, production: 12, cost: 1, endurance: 45 },
+      { mothers: 3, perMother: 4, hp: 16, damage: 1.2, interval: .4, ammo: 24, range: 360, attackRange: 75, speed: 80, supply: 3, production: 11, cost: 1.5, endurance: 55 },
+      { mothers: 3, perMother: 4, hp: 20, damage: 1.5, interval: .35, ammo: 30, range: 440, attackRange: 85, speed: 95, supply: 2, production: 10, cost: 2, endurance: 65 },
+      { mothers: 3, perMother: 4, hp: 36, damage: 2.5, interval: .3, ammo: 40, range: 600, attackRange: 95, speed: 115, supply: 1.5, production: 9, cost: 3, endurance: 80 }
+    ],
+    // 吞星船：专职吞噬，无攻击；数量与血量随科技提升，2/5/7 级张开形态不同。
+    devour: {
+      tech: 2,
+      limit: [0, 0, 1, 1, 1, 2, 2, 2],
+      hp: [0, 0, 420, 560, 720, 900, 1100, 1350],
+      radius: 2.5, speed: 80, towSpeed: 55, towGap: 14, orbitOffset: 6,
+      rate: 4, ratePerTech: 1.5, overrunDamage: 8
+    }
   },
   population: {
     initial: 95, target: 130, nearby: 12, batch: 6,

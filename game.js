@@ -97,6 +97,7 @@
     return SolarFleet.create({
       bodies: () => bodies, enemies: () => ships, player: () => player,
       id: () => nextId++, resize: updateSize, destroy: destroyUnit, gain: gainMass,
+      damage: (target, amount, attacker, cause) => damageUnit(target, amount, attacker, cause),
       fire: (attacker, target, damage) => fireLaser(attacker, target, damage, "#91ddff"),
       harvest: harvestMass, threatRank: fleetThreatRank
     });
@@ -275,7 +276,7 @@
       b.host = null; b.orbitRadius = 0; b.captureAfter = time + 2;
     }
     for (const b of bodies) {
-      if (!b.alive || b === player || b.type !== 0 || b.host !== null || time < b.captureAfter || time < b.cooldown) continue;
+      if (!b.alive || b === player || b.type !== 0 || b.host !== null || b.devouredBy || time < b.captureAfter || time < b.cooldown) continue;
       let candidate = null, nearest = Infinity;
       for (const host of hosts) {
         if (host === b || bodyMass(host) <= bodyMass(b) * CAPTURE.massRatio || occupied.get(host.id) >= satelliteLimit(host.type)) continue;
@@ -344,9 +345,9 @@
     target.alive = false;
     if (target.entity === "mothership") for (const child of target.fleet) child.alive = false;
     if (target.entity === "carrier") for (const child of target.owner.artifacts) {
-      if (child.entity === "drone" && child.mother === target) { child.alive = false; child.cargo = 0; }
+      if (child.entity === "drone" && child.mother === target) child.alive = false;
     }
-    if (!target.entity) for (const unit of target.artifacts) { unit.alive = false; if (unit.entity === "drone") unit.cargo = 0; }
+    if (!target.entity) for (const unit of target.artifacts) unit.alive = false;
     burst(target.x, target.y, target.entity ? "#ff6f72" : TYPES[target.type].color, 24, 45);
     const credited = attacker?.owner || attacker;
     if (credited?.alive && !credited.entity && !credited.natural) {
@@ -645,6 +646,8 @@
     if (!a.alive || !b.alive) return;
     // 主星与所属卫星、同一主星的卫星之间不发生碰撞伤害。
     if (a.host !== null && a.host === b.host || a.host === b.id || b.host === a.id) return;
+    // 被吞星船裹挟的天体不与吞噬它的主星发生碰撞。
+    if (a.devouredBy === b.id || b.devouredBy === a.id) return;
     const sx = b.px - a.px, sy = b.py - a.py;
     const dx = (b.x - a.x) - sx, dy = (b.y - a.y) - sy;
     const t = clamp(-(sx * dx + sy * dy) / (dx * dx + dy * dy || 1), 0, 1);
@@ -879,6 +882,7 @@
         typeof city.built === "boolean" && (!city.built || city.hp > 0))) return false;
     if (c.city !== c.cities.some(city => city.built && city.hp > 0)) return false;
     if (!["shield", "gun", "carrier", "city0", "city1"].every(key => positive([c.projects[key]]) && c.projects[key] <= 1)) return false;
+    if (c.projects.devour !== undefined && !(positive([c.projects.devour]) && c.projects.devour <= 1)) return false;
     if (c.shield > CIV.stats({ civ: c }).shield || c.population === 0 && (c.tech > 0 || c.shield > 0 || c.cities.some(city => city.hp > 0))) return false;
     if (!Array.isArray(f.facilities) || !Array.isArray(f.planes) || f.facilities.length > 6 || f.planes.length > 12) return false;
     const slots = new Set();
@@ -893,9 +897,10 @@
     const spec = CONFIG.fleet.grades[Math.min(3, Math.max(0, c.tech - 3))];
     for (const p of f.planes) {
       if (!p || !slots.has("carrier" + p.motherSlot) || ![p.x, p.y, p.vx, p.vy].every(Number.isFinite) ||
-          !positive([p.hp, p.hitAgo, p.shots, p.cargo, p.readyRemaining, p.flightAge, p.enduranceRemaining, p.attackRemaining]) ||
-          p.hp <= 0 || p.hp > spec.hp || p.cargo > spec.cargo || p.shots > spec.ammo || typeof p.docked !== "boolean") return false;
+          !positive([p.hp, p.hitAgo, p.shots, p.readyRemaining, p.flightAge, p.enduranceRemaining, p.attackRemaining]) ||
+          p.hp <= 0 || p.hp > spec.hp || p.shots > spec.ammo || typeof p.docked !== "boolean") return false;
     }
+    if (f.devourers !== undefined && !(Number.isInteger(f.devourers) && f.devourers >= 0 && f.devourers <= 2)) return false;
     return s.healthyMass + .00001 >= s.mass && s.peakMass + .00001 >= s.mass;
   }
 
@@ -962,7 +967,9 @@
   function restorePlayer(snapshot) {
     player.mass = snapshot.mass; player.healthyMass = snapshot.healthyMass; player.integrity = snapshot.integrity;
     time = snapshot.elapsed; peakMass = snapshot.peakMass; absorbed = snapshot.absorbed; driftDistance = snapshot.distance;
-    player.civ = { ...snapshot.civ, cities: snapshot.civ.cities.map(city => ({ ...city, lastHit: time - city.lastHit })), projects: { ...snapshot.civ.projects },
+    // 合并默认字段，兼容旧存档缺失的建造项（例如 devour）。
+    player.civ = { ...CIV.create(), ...snapshot.civ, cities: snapshot.civ.cities.map(city => ({ ...city, lastHit: time - city.lastHit })),
+      projects: { ...CIV.create().projects, ...snapshot.civ.projects },
       lastHit: time - snapshot.civ.lastHit, coreHitUntil: time + snapshot.civ.coreHitUntil };
     player.kills = { planet: snapshot.kills.planet, mothership: snapshot.kills.mothership };
     player.recallUntil = time + snapshot.recallRemaining; nextPopulation = time + 2;
@@ -1306,10 +1313,53 @@
     glow(r * .05, 0, r * .6, `${grade.color}44`);
   }
 
+  function drawDevourer(ship, x, y, r) {
+    const owner = ship.owner, zoom = camera.zoom;
+    if (ship.state === "anchor" && ship.target?.alive) {
+      const tx = screenX(ship.target.x), ty = screenY(ship.target.y), tr = ship.target.radius * zoom;
+      const style = owner.civ.tech >= 7 ? 2 : owner.civ.tech >= 5 ? 1 : 0;
+      ctx.save();
+      for (let layer = 0; layer <= style; layer++) {
+        const radius = tr + (4 + layer * 3) * zoom, segments = 8 + style * 4 + layer * 2;
+        ctx.beginPath(); ctx.arc(tx, ty, radius, 0, TAU);
+        ctx.strokeStyle = layer ? "#8aa6bbaa" : "#cbdae8cc";
+        ctx.lineWidth = Math.max(.5, (1.3 - layer * .2) * zoom); ctx.stroke();
+        for (let i = 0; i < segments; i++) {
+          const a = time * .4 + i * TAU / segments + layer;
+          ctx.fillStyle = i % 2 ? "#8fd3e8" : "#b8c4d0";
+          ctx.fillRect(tx + Math.cos(a) * radius - zoom, ty + Math.sin(a) * radius - zoom, 2 * zoom, 2 * zoom);
+        }
+      }
+      if (style === 2) {
+        ctx.globalAlpha = .45 + .3 * Math.sin(time * 3 + ship.id);
+        ctx.beginPath(); ctx.arc(tx, ty, tr + 6 * zoom, time * .8, time * .8 + 2.2);
+        ctx.strokeStyle = "#c7a6ff"; ctx.lineWidth = Math.max(.6, 1.4 * zoom); ctx.stroke();
+      }
+      ctx.restore();
+      // 微微闪烁的连线，向主星传递质量。
+      ctx.save(); ctx.globalAlpha = .1 + .08 * Math.sin(time * 7 + ship.id);
+      ctx.strokeStyle = "#bfe9ff"; ctx.lineWidth = Math.max(.5, .6 * zoom);
+      ctx.setLineDash([2 * zoom, 6 * zoom]);
+      ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(screenX(owner.x), screenY(owner.y)); ctx.stroke();
+      ctx.restore();
+    }
+    ctx.save(); ctx.translate(x, y); ctx.rotate(time * .5 + ship.id);
+    ctx.fillStyle = "#2a3947"; ctx.strokeStyle = "#a9d6e6"; ctx.lineWidth = .6 * zoom;
+    for (let i = 0; i < 3; i++) {
+      const a = i * TAU / 3;
+      ctx.beginPath(); ctx.moveTo(0, 0);
+      ctx.lineTo(Math.cos(a) * r * 1.7, Math.sin(a) * r * 1.7);
+      ctx.lineTo(Math.cos(a + .7) * r, Math.sin(a + .7) * r);
+      ctx.closePath(); ctx.fill(); ctx.stroke();
+    }
+    circle(0, 0, r * .7, "#9fe0d6");
+    ctx.restore();
+  }
   function drawShip(ship) {
     if (!ship.alive || ship.mode === "dock") return;
     const x = screenX(ship.x), y = screenY(ship.y), r = ship.radius * camera.zoom;
     if (x < -30 || x > width + 30 || y < -30 || y > height + 30) return;
+    if (ship.entity === "devourer") { drawDevourer(ship, x, y, r); return; }
     ctx.save(); ctx.translate(x, y);
     ctx.rotate(ship.entity === "mothership" ? time * .05 : ship.entity === "gun" ? ship.aim : Math.atan2(ship.vy, ship.vx));
     if (ship.entity === "mothership") drawMothership(ship, r);
@@ -1374,7 +1424,6 @@
         ctx.fill();
       }
       circle(r * .3, 0, Math.max(.4, r * .18), isDrone ? "#eafcff" : edge);
-      if (player0 && ship.cargo > 0) circle(-r * .4, 0, Math.max(.5, camera.zoom * .9), "#ffd27c");
     }
     ctx.restore();
     if (ship.impact && time - ship.impact.at < .24) {

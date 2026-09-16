@@ -8,7 +8,7 @@ globalThis.SolarCivilization = (() => {
     return { population: 0, tech: 0, research: 0, shield: 0, lastHit: -Infinity, coreHitUntil: 0,
       incubation: 0, extinct: false, city: false, pressure: 0, consumption: 0,
       cities: SolarConfig.fleet.construction.cityHp.map(maxHp => ({ hp: 0, maxHp, built: false, lastHit: -Infinity })),
-      projects: { shield: 0, gun: 0, carrier: 0, city0: 0, city1: 0 } };
+      projects: { shield: 0, gun: 0, carrier: 0, devour: 0, city0: 0, city1: 0 } };
   }
   function syncCities(body) {
     body.civ.city = body.civ.cities.some(city => city.built && city.hp > 0);
@@ -45,7 +45,7 @@ globalThis.SolarCivilization = (() => {
     return body.civ.shield > 0 || body.civ.cities.some(city => city.hp > 0) || body.artifacts.some(unit => unit.alive);
   }
   function extinguish(body) {
-    for (const unit of body.artifacts) { unit.alive = false; if (unit.entity === "drone") unit.cargo = 0; }
+    for (const unit of body.artifacts) unit.alive = false;
     body.artifacts = [];
     const blockedUntil = body.civ.coreHitUntil;
     Object.assign(body.civ, create(), { extinct: true, coreHitUntil: blockedUntil });
