@@ -131,6 +131,10 @@ dialog p{font-size:12px;color:#91a6ba;line-height:1.85}
 .save-entry{margin-top:20px;padding-top:16px;border-top:1px solid #ffffff16}
 .save-entry button{width:100%;font-size:12px}
 .save-entry p{font-size:11px;margin:10px 0 0}
+.save-list{display:grid;gap:8px;max-height:min(220px,30dvh);overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin;scrollbar-color:#71839750 transparent}
+.save-option{text-align:left;line-height:1.5}
+.save-option strong{display:block;font-weight:600;color:#cfe6ea}
+.save-option small{display:block;font-size:10px;color:#718397;margin-top:3px}
 button:disabled{cursor:default;opacity:.4}
 #save-status{color:#a9cabf}
 @media(max-width:600px){.brand{top:20px;left:20px;font-size:17px}.brand-mark{font-size:26px}.english{font-size:12px;letter-spacing:2px}.telemetry{top:68px;left:22px;width:190px}.stage-line h1{font-size:17px}.stats strong{font-size:15px}dialog{padding:22px}}

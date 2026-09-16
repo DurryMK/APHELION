@@ -95,5 +95,5 @@ globalThis.SolarConfig = {
     patrolRadius: 110, patrolOrbitSpeed: .12, acceleration: 32, steering: 1.6,
     mothershipRange: 150, mothershipDamage: 4, mothershipInterval: 2
   },
-  saveKey: "aphelion-civilization-save-v4"
+  savePrefix: "aphelion-civilization-save-v5"
 };

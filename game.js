@@ -14,7 +14,7 @@
   let width, height, dpr, stars, nebula;
   let bodies = [], player = null, particles = [];
   let ships = [], beams = [], nestRecords = new Map(), nextCivilization = 0, nextCombat = 0;
-  let pointer = { x: 0, y: 0 }, savedGame = null;
+  let pointer = { x: 0, y: 0 }, activeSaveName = null;
   let choosingStart = true;
   let selectedSatelliteId = null, satelliteClickAt = -Infinity;
   let fleets = createCivilianFleet(), nextFleet = 0;
@@ -213,7 +213,7 @@
     }
   }
 
-  function reset(startType, snapshot = null) {
+  function reset(startType, snapshot = null, saveName = null) {
     bodies = []; particles = []; nextId = 1;
     ships = []; beams = []; nestRecords = new Map(); nextCivilization = 0; nextCombat = 0;
     universeSeed = Math.floor(Math.random() * 4294967296);
@@ -225,7 +225,7 @@
     fleets = createCivilianFleet();
     nextFleet = 0;
     camera.x = 0; camera.y = 0; camera.zoom = 1; camera.targetZoom = 1;
-    clearMovement(); paused = false; ended = false; choosingStart = false;
+    clearMovement(); paused = false; ended = false; choosingStart = false; activeSaveName = saveName;
     time = 0; accumulator = 0; lastFrame = 0; nextPopulation = 2; nextHud = 0; peakMass = startMass; absorbed = 0; shake = 0;
     driftDistance = 0;
     warningCache = { at: -Infinity, records: [] };
@@ -436,7 +436,7 @@
   }
 
   function fireLaser(attacker, target, damage, color) {
-    beams.push({ x: attacker.x, y: attacker.y, tx: target.x, ty: target.y, life: .18, color });
+    beams.push({ x: attacker.x, y: attacker.y, tx: target.x, ty: target.y, life: .18, duration: .18, color });
     damageUnit(target, damage, attacker, "laser");
   }
 
@@ -899,27 +899,63 @@
     return s.healthyMass + .00001 >= s.mass && s.peakMass + .00001 >= s.mass;
   }
 
+  const savePrefix = () => CONFIG.savePrefix + ":";
+  function listSaves() {
+    const saves = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (!key || !key.startsWith(savePrefix())) continue;
+      try {
+        const snapshot = JSON.parse(localStorage.getItem(key));
+        if (validSnapshot(snapshot)) saves.push({ key, name: key.slice(savePrefix().length), snapshot });
+      } catch (error) { /* 跳过无法解析的存档 */ }
+    }
+    return saves.sort((a, b) => b.snapshot.savedAt - a.snapshot.savedAt);
+  }
+
+  function saveName() {
+    if (!player?.alive) return CONFIG.savePrefix;
+    const pad = n => String(n).padStart(2, "0"), now = new Date();
+    const stamp = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}-${pad(now.getMinutes())}-${pad(now.getSeconds())}`;
+    const title = CONFIG.populationTitles.filter(t => player.civ.population >= t.population).at(-1);
+    return `${TYPES[player.type].name} - ${title ? title.name : TYPES[0].name} - ${stamp}`;
+  }
+
   function readSave() {
-    const status = document.getElementById("save-summary"), load = document.getElementById("load-save");
-    savedGame = null; load.disabled = true;
-    try {
-      const raw = localStorage.getItem(CONFIG.saveKey);
-      if (raw === null) { SolarLanguage.text(status, "No save for this civilization era yet."); return; }
-      const snapshot = JSON.parse(raw);
-      if (!validSnapshot(snapshot)) { SolarLanguage.text(status, "Invalid save data."); return; }
-      savedGame = snapshot; load.disabled = false;
-      SolarLanguage.text(status, `${TYPES[typeOf(snapshot.mass)].name} · Tech ${snapshot.civ.tech} · population ${(snapshot.civ.population / 1e6).toFixed(1)} M · ${new Date(snapshot.savedAt).toLocaleString()}`);
-    } catch (error) {
-      SolarLanguage.text(status, "Unable to read save. Check browser storage permissions.");
+    const status = document.getElementById("save-summary"), list = document.getElementById("save-list");
+    list.replaceChildren();
+    let saves = [];
+    try { saves = listSaves(); }
+    catch (error) { SolarLanguage.text(status, "Unable to read save. Check browser storage permissions."); return; }
+    if (saves.length === 0) { SolarLanguage.text(status, "No save for this civilization era yet."); return; }
+    SolarLanguage.text(status, "");
+    for (const save of saves) {
+      const button = document.createElement("button");
+      button.type = "button"; button.className = "save-option";
+      const name = document.createElement("strong"); SolarLanguage.text(name, save.name);
+      const detail = document.createElement("small");
+      SolarLanguage.text(detail, `${TYPES[typeOf(save.snapshot.mass)].name} - Tech ${save.snapshot.civ.tech} - ${(save.snapshot.civ.population / 1e6).toFixed(1)} M - ${new Date(save.snapshot.savedAt).toLocaleString()}`);
+      button.append(name, detail);
+      button.addEventListener("click", () => {
+        startScreen.close();
+        reset(typeOf(save.snapshot.mass), save.snapshot, save.name);
+        announce("Your journey continues beneath unfamiliar stars");
+      });
+      list.append(button);
     }
   }
 
   function savePlayer() {
     if (!player?.alive || ended || choosingStart) return;
+    const name = saveName();
     try {
-      localStorage.setItem(CONFIG.saveKey, JSON.stringify(playerSnapshot()));
+      // 从存档启动时覆盖原记录，否则新建一条存档。
+      if (activeSaveName && activeSaveName !== name) localStorage.removeItem(savePrefix() + activeSaveName);
+      activeSaveName = name;
+      localStorage.setItem(savePrefix() + name, JSON.stringify(playerSnapshot()));
+      announce("Journey recorded");
     } catch (error) {
-      console.error("Autosave failed", error);
+      announce("Save failed. Check browser storage permissions and available space.");
     }
   }
 
@@ -1338,10 +1374,15 @@
     }
     for (const b of bodies) drawBody(b);
     for (const ship of [...ships, ...fleets.units]) drawShip(ship);
+    // 激光改为沿路径飞行的短光线，伤害仍在开火瞬间结算。
     for (const beam of beams) {
-      ctx.globalAlpha = clamp(beam.life / .18, 0, 1);
-      ctx.beginPath(); ctx.moveTo(screenX(beam.x), screenY(beam.y)); ctx.lineTo(screenX(beam.tx), screenY(beam.ty));
-      ctx.strokeStyle = beam.color; ctx.lineWidth = beam.cannon ? 2.3 : .9; ctx.stroke();
+      const progress = clamp(1 - beam.life / beam.duration, 0, 1);
+      const sx = screenX(beam.x), sy = screenY(beam.y), ex = screenX(beam.tx), ey = screenY(beam.ty);
+      const dx = ex - sx, dy = ey - sy, length = Math.hypot(dx, dy) || 1;
+      const headX = sx + dx * progress, headY = sy + dy * progress, tail = Math.min(length, 12);
+      ctx.globalAlpha = clamp(beam.life / (beam.duration * .3), 0, 1);
+      ctx.beginPath(); ctx.moveTo(headX - dx / length * tail, headY - dy / length * tail); ctx.lineTo(headX, headY);
+      ctx.strokeStyle = beam.color; ctx.lineWidth = 1.4; ctx.stroke();
     }
     ctx.globalAlpha = 1;
     for (const p of particles) { ctx.globalAlpha = clamp(p.life / p.total, 0, 1); circle(screenX(p.x), screenY(p.y), Math.max(.55, camera.zoom), p.color); }
@@ -1516,12 +1557,6 @@
   document.getElementById("touch-pause").addEventListener("click", togglePause);
   document.getElementById("recall-fleet").addEventListener("click", recallFleet);
   document.getElementById("touch-trail").addEventListener("click", toggleOrbits);
-  document.getElementById("load-save").addEventListener("click", () => {
-    readSave();
-    if (!savedGame) return;
-    startScreen.close(); reset(typeOf(savedGame.mass), savedGame);
-    announce("Your journey continues beneath unfamiliar stars");
-  });
   ui["pause-screen"].addEventListener("cancel", event => { event.preventDefault(); if (paused) togglePause(); });
   const startScreen = document.getElementById("start-screen");
   const startForm = document.getElementById("start-form");
@@ -1560,6 +1595,7 @@
     if (event.code === "KeyR") { event.preventDefault(); recallFleet(); return; }
     if (event.code === "KeyK") { event.preventDefault(); cycleSatellite(); return; }
     if (event.code === "KeyL") { event.preventDefault(); absorbSelectedSatellite(); return; }
+    if (event.code === "KeyP") { event.preventDefault(); savePlayer(); return; }
     if (event.code === "Space") { event.preventDefault(); togglePause(); return; }
     if (event.code === "KeyO") toggleOrbits();
   });
@@ -1662,7 +1698,5 @@
     }, 800);
   }, 20000);
 
-  // 存档使用独立计时器，主动暂停期间仍保存当前状态。
-  setInterval(savePlayer, 1000);
   resize(); openStartSelection(); requestAnimationFrame(frame);
 })();

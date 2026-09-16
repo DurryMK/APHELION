@@ -92,6 +92,7 @@
         <dt class="keyboard-only">Double-click</dt><dd class="keyboard-only">Absorb a captured moon.</dd>
         <dt class="keyboard-only">R</dt><dd class="keyboard-only">Return all ships; hold departures for 10 seconds.</dd>
         <dt class="keyboard-only">Wheel / O</dt><dd class="keyboard-only">Zoom / toggle trail.</dd>
+        <dt class="keyboard-only">P</dt><dd class="keyboard-only">Record the journey.</dd>
         <dt class="keyboard-only">Space</dt><dd class="keyboard-only">View guide / resume.</dd>
       </dl>
     </section>
@@ -113,7 +114,7 @@
       <fieldset id="start-types"><legend>Starting body</legend></fieldset>
       <p id="start-summary" aria-live="polite"></p>
       <button class="start-button" type="submit">Begin journey ↗</button>
-      <div class="save-entry"><button id="load-save" type="button" disabled>Continue · New sandbox</button><p id="save-summary" role="status"></p></div>
+      <div class="save-entry"><div id="save-list" class="save-list" role="list" aria-label="Saved journeys"></div><p id="save-summary" role="status"></p></div>
     </form>
   </dialog>
   <script src="language.js"></script>
