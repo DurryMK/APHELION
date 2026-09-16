@@ -1031,6 +1031,97 @@
     gradient.addColorStop(0, color); gradient.addColorStop(1, "transparent");
     ctx.fillStyle = gradient; ctx.fillRect(x - r, y - r, r * 2, r * 2);
   }
+  const TAU = Math.PI * 2;
+  // 球面正交投影：返回归一化屏幕偏移与朝向观察者的深度 z（z<=0 为背面）。
+  function projectSphere(lat, lon, tiltSin, tiltCos) {
+    const cl = Math.cos(lat), X = cl * Math.sin(lon), Y = Math.sin(lat), Z = cl * Math.cos(lon);
+    return { x: X, y: Z * tiltSin - Y * tiltCos, z: Y * tiltSin + Z * tiltCos };
+  }
+  // 每种天体的地表特征只生成一次；自转由 phase 驱动，不占用模拟实体。
+  const SURFACE_SPOTS = TYPES.map((type, index) => {
+    let seed = ((index + 1) * 2654435761) >>> 0 || 1;
+    const rnd = () => { seed = ((Math.imul(seed ^ (seed >>> 15), 2246822519) + seed) >>> 0) || 1; return seed / 4294967296; };
+    const spots = [];
+    if (type.kind === "gas") {
+      for (let i = 0; i < 5; i++) spots.push({ band: -1 + i * .5, tone: i % 2 ? 1 : -1 });
+      spots.push({ lat: .2, lon: rnd() * TAU, size: .24, tone: -1 });
+    } else {
+      const count = type.kind === "ice" ? 7 : 6;
+      for (let i = 0; i < count; i++) spots.push({ lat: (rnd() * 2 - 1) * .82, lon: rnd() * TAU,
+        size: .12 + rnd() * .16, tone: rnd() < .5 ? 1 : -1 });
+    }
+    return spots;
+  });
+  // 绕极轴的三维自转：特征沿纬线移动、边缘透视压扁、背面隐藏，极冠固定。
+  function drawSurface(x, y, r, b, kind) {
+    const spots = SURFACE_SPOTS[b.type];
+    if (!spots || r < 4) return;
+    const spin = time * (kind === "gas" ? .08 : .14) + b.phase;
+    const tilt = kind === "gas" ? .22 : .4, sT = Math.sin(tilt), cT = Math.cos(tilt);
+    for (const pole of [1, -1]) {
+      const cap = projectSphere(pole * (Math.PI / 2 - .22), 0, sT, cT);
+      if (cap.z <= 0) continue;
+      ctx.save(); ctx.globalAlpha = .4 + cap.z * .35;
+      ctx.beginPath(); ctx.ellipse(x + cap.x * r, y + cap.y * r, r * .4, Math.max(.6, r * .14), tilt * pole, 0, TAU);
+      ctx.fillStyle = kind === "ice" ? "#f4ffff" : "#e6eef5"; ctx.fill(); ctx.restore();
+    }
+    if (kind === "gas") {
+      for (const spot of spots) {
+        if (spot.band !== undefined) {
+          ctx.fillStyle = spot.tone > 0 ? "#fff1bf66" : "#965b4466";
+          ctx.fillRect(x - r, y + spot.band * r * .55 - r * .12, r * 2, r * .24);
+          continue;
+        }
+        const p = projectSphere(spot.lat, spot.lon + spin, sT, cT);
+        if (p.z <= 0) continue;
+        ctx.save(); ctx.globalAlpha = .45 + p.z * .4;
+        ctx.beginPath(); ctx.ellipse(x + p.x * r, y + p.y * r, spot.size * r * Math.max(.25, p.z), spot.size * r, 0, 0, TAU);
+        ctx.fillStyle = "#ffd9a8"; ctx.fill(); ctx.restore();
+      }
+      return;
+    }
+    for (const spot of spots) {
+      const p = projectSphere(spot.lat, spot.lon + spin, sT, cT);
+      if (p.z <= 0) continue;
+      const size = spot.size * r;
+      ctx.save(); ctx.globalAlpha = Math.min(.85, .12 + p.z * .75);
+      ctx.beginPath(); ctx.ellipse(x + p.x * r, y + p.y * r, size * Math.max(.22, p.z), size, spin * .2, 0, TAU);
+      ctx.fillStyle = spot.tone > 0 ? "#ffffff" : "#0a1626"; ctx.fill(); ctx.restore();
+    }
+  }
+  // 纯装饰：公转望远镜/卫星、太空电梯、环间运输船。不进入物理与舰队列表。
+  function drawOrbitals(x, y, r, b, ring, vitality) {
+    if (r < 5) return;
+    const zoom = camera.zoom, c = b.civ;
+    const count = Math.min(5, 1 + Math.floor(vitality * 4));
+    for (let i = 0; i < count; i++) {
+      const orbit = ring.outer + 5 + i * 6;
+      const angle = b.phase * 1.7 + i * 2.4 + time * (.18 + i * .04);
+      const px = x + Math.cos(angle) * orbit * zoom, py = y + Math.sin(angle) * orbit * zoom;
+      const size = Math.max(.6, (1.1 + (i % 2) * .5) * zoom);
+      ctx.save(); ctx.translate(px, py); ctx.rotate(angle + Math.PI / 2); ctx.globalAlpha = .3 + vitality * .5;
+      ctx.strokeStyle = "#cfe0e8"; ctx.lineWidth = Math.max(.5, .55 * zoom);
+      ctx.beginPath(); ctx.moveTo(-size, 0); ctx.lineTo(size, 0); ctx.stroke();
+      if (i % 2) { ctx.fillStyle = "#9fd8e6"; ctx.fillRect(-size * .2, -size * .5, size * .4, size); }
+      else { ctx.fillStyle = "#e8d9a6"; ctx.beginPath(); ctx.arc(0, 0, size * .42, 0, TAU); ctx.fill(); }
+      ctx.restore();
+    }
+    // 太空电梯：锚点随地表自转，连接主星与各城市环。
+    const spin = time * .14 + b.phase, radii = [r];
+    if (c.cities[0].hp > 0) radii.push(ring.city0 * zoom);
+    if (c.cities[1].hp > 0) radii.push(ring.city1 * zoom);
+    if (radii.length > 1) for (let i = 0; i < 3; i++) {
+      const angle = spin + i * TAU / 3, cos = Math.cos(angle), sin = Math.sin(angle);
+      ctx.save(); ctx.globalAlpha = .12 + vitality * .3;
+      ctx.strokeStyle = "#9fb6c2"; ctx.lineWidth = Math.max(.45, .5 * zoom);
+      for (let k = 1; k < radii.length; k++) {
+        ctx.beginPath(); ctx.moveTo(x + cos * radii[k - 1], y + sin * radii[k - 1]);
+        ctx.lineTo(x + cos * radii[k], y + sin * radii[k]); ctx.stroke();
+        circle(x + cos * radii[k], y + sin * radii[k], Math.max(.5, .8 * zoom), "#cfe6ea");
+      }
+      ctx.restore();
+    }
+  }
 
   function drawBody(b) {
     if (!b.alive) return;
@@ -1054,18 +1145,7 @@
       glow(x, y, r * (kind === "ice" ? 3.5 : 2.5), `${color}25`);
       circle(x, y, r, color);
       ctx.save(); ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.clip();
-      if (kind === "rock") {
-        circle(x - r * .3, y + r * .3, r * .32, "#723c4488");
-        circle(x + r * .35, y - r * .25, r * .27, "#6e404977");
-      } else if (kind === "ice") {
-        ctx.beginPath(); ctx.moveTo(x - r, y + r * .5); ctx.lineTo(x, y - r * .2); ctx.lineTo(x + r * .6, y - r);
-        ctx.strokeStyle = "#efffffbb"; ctx.lineWidth = .6; ctx.stroke();
-      } else {
-        for (let i = -2; i <= 2; i++) {
-          ctx.fillStyle = i % 2 ? "#965b4477" : "#fff1bf88";
-          ctx.fillRect(x - r, y + i * r * .4, r * 2, r * .17);
-        }
-      }
+      drawSurface(x, y, r, b, kind);
       circle(x + r * .6, y + r * .25, r * .85, "#08192d55"); ctx.restore();
       if (kind === "gas") { ctx.beginPath(); ctx.ellipse(x, y, r * 1.9, r * .55, -.45, 0, Math.PI * 2); ctx.strokeStyle = `${color}88`; ctx.lineWidth = .7; ctx.stroke(); }
     } else if (kind === "star") {
@@ -1109,9 +1189,16 @@
     const vitality = c.population >= CONFIG.civilization.extinctionPopulation ?
       Math.min(1, Math.log2(1 + c.population / 1e7) / 6) * Math.max(0, 1 - c.pressure / 2) : 0;
     const lights = Math.floor(12 * vitality);
-    for (let i = 0; i < lights; i++) {
-      const angle = b.phase + i * 2.4 + time * .04;
-      circle(x + Math.cos(angle) * r * .65, y + Math.sin(angle) * r * .65, .55 * camera.zoom, "#fff4bb");
+    if (lights > 0) {
+      const sT = Math.sin(.4), cT = Math.cos(.4), spin = time * .14 + b.phase;
+      for (let i = 0; i < lights; i++) {
+        const y0 = 1 - (i + .5) / lights * 2;
+        const p = projectSphere(Math.asin(Math.max(-1, Math.min(1, y0))), i * 2.399963 + spin, sT, cT);
+        if (p.z <= .05) continue;
+        ctx.globalAlpha = Math.min(1, p.z);
+        circle(x + p.x * r * .92, y + p.y * r * .92, .5 * camera.zoom, "#fff4bb");
+      }
+      ctx.globalAlpha = 1;
     }
     for (let layer = 0; layer < 2; layer++) {
       const city = c.cities[layer]; if (city.hp <= 0) continue;
@@ -1147,6 +1234,7 @@
         circle(x + Math.cos(angle) * radius, y + Math.sin(angle) * radius, .7 * camera.zoom, "#b5f0e7");
       }
     }
+    if (vitality > .05 && c.tech >= 3) drawOrbitals(x, y, r, b, ring, vitality);
     if (c.shield > 0) {
       ctx.save(); ctx.globalAlpha = .15 + c.shield / CIV.stats(b).shield * .55;
       ctx.beginPath(); ctx.arc(x, y, shell, 0, Math.PI * 2);
@@ -1176,21 +1264,6 @@
         ctx.beginPath(); ctx.moveTo(x + Math.cos(angle) * radius, y + Math.sin(angle) * radius);
         ctx.lineTo(x + Math.cos(angle) * (radius - 3 * camera.zoom), y + Math.sin(angle) * (radius - 3 * camera.zoom));
         ctx.strokeStyle = "#ffdfae"; ctx.lineWidth = .8; ctx.stroke(); ctx.restore();
-      }
-      if (c.tech >= 3) {
-        ctx.save(); ctx.globalAlpha = vitality;
-        const count = Math.min(4, 1 + Math.floor(vitality * 3));
-        for (let i = 0; i < count; i++) {
-          const seed = b.phase + i * 2.399;
-          const angle = time * (.16 + i * .025) + seed;
-          const radius = (ring.outer + 3 + Math.sin(seed + time * .1) * .5) * camera.zoom;
-          const size = (.65 + (Math.sin(seed * 3) + 1) * .2) * camera.zoom;
-          ctx.save(); ctx.translate(x + Math.cos(angle) * radius, y + Math.sin(angle) * radius); ctx.rotate(seed + time * .07);
-          ctx.beginPath(); ctx.moveTo(-size, -size * .25); ctx.lineTo(size * .2, -size * .8);
-          ctx.lineTo(size * .75, size * .15); ctx.lineTo(-size * .15, size * .65); ctx.closePath();
-          ctx.fillStyle = i % 2 ? "#b1bcc7" : "#a6dbe7"; ctx.fill(); ctx.restore();
-        }
-        ctx.restore();
       }
     }
   }
@@ -1276,10 +1349,32 @@
       circle(-r * .45, 0, .55 * camera.zoom, "#8ed9cf");
     }
     else {
-      ctx.beginPath(); ctx.moveTo(r, 0); ctx.lineTo(-r, r * .7); ctx.lineTo(-r * .4, 0); ctx.lineTo(-r, -r * .7);
-      ctx.closePath(); ctx.fillStyle = ship.entity === "drone" ? ship.owner === player ? "#74c9d1" : "#bc8ade" : ship.mode === "spent" ? "#635d69" : CONFIG.nests.grades[ship.grade].hull; ctx.fill();
-      ctx.strokeStyle = ship.entity === "drone" ? "#d0f6ff" : CONFIG.nests.grades[ship.grade].color; ctx.lineWidth = .7; ctx.stroke();
-      if (ship.entity === "drone" && ship.cargo > 0) circle(-r, 0, camera.zoom, "#ffd27c");
+      const isDrone = ship.entity === "drone", player0 = isDrone && ship.owner === player;
+      const edge = isDrone ? "#d0f6ff" : CONFIG.nests.grades[ship.grade].color;
+      const hull = isDrone ? (player0 ? "#74c9d1" : "#bc8ade") : CONFIG.nests.grades[ship.grade].hull;
+      // 细长箭形机身 + 两侧后掠翼
+      ctx.beginPath();
+      ctx.moveTo(r, 0);
+      ctx.lineTo(-r * .1, r * .72);
+      ctx.lineTo(-r * .95, r * .46);
+      ctx.lineTo(-r * .5, 0);
+      ctx.lineTo(-r * .95, -r * .46);
+      ctx.lineTo(-r * .1, -r * .72);
+      ctx.closePath();
+      ctx.fillStyle = hull; ctx.fill();
+      ctx.strokeStyle = edge; ctx.lineWidth = .7; ctx.stroke();
+      const speed = Math.hypot(ship.vx, ship.vy);
+      if (speed > 1 && r > 2.2) {
+        ctx.beginPath();
+        ctx.moveTo(-r * .8, -r * .2);
+        ctx.lineTo(-r * (1 + Math.min(1, speed * .015)), 0);
+        ctx.lineTo(-r * .8, r * .2);
+        ctx.closePath();
+        ctx.fillStyle = !isDrone ? edge + "cc" : player0 ? "#9fe8ffcc" : "#d9b6ffcc";
+        ctx.fill();
+      }
+      circle(r * .3, 0, Math.max(.4, r * .18), isDrone ? "#eafcff" : edge);
+      if (player0 && ship.cargo > 0) circle(-r * .4, 0, Math.max(.5, camera.zoom * .9), "#ffd27c");
     }
     ctx.restore();
     if (ship.impact && time - ship.impact.at < .24) {
@@ -1379,7 +1474,7 @@
       const progress = clamp(1 - beam.life / beam.duration, 0, 1);
       const sx = screenX(beam.x), sy = screenY(beam.y), ex = screenX(beam.tx), ey = screenY(beam.ty);
       const dx = ex - sx, dy = ey - sy, length = Math.hypot(dx, dy) || 1;
-      const headX = sx + dx * progress, headY = sy + dy * progress, tail = Math.min(length, 12);
+      const headX = sx + dx * progress, headY = sy + dy * progress, tail = Math.min(length, 6);
       ctx.globalAlpha = clamp(beam.life / (beam.duration * .3), 0, 1);
       ctx.beginPath(); ctx.moveTo(headX - dx / length * tail, headY - dy / length * tail); ctx.lineTo(headX, headY);
       ctx.strokeStyle = beam.color; ctx.lineWidth = 1.4; ctx.stroke();

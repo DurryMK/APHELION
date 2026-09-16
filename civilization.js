@@ -25,16 +25,21 @@ globalThis.SolarCivilization = (() => {
     if (body.civ.population < config.extinctionPopulation) return 0;
     return Math.min(SolarConfig.fleet.construction.maxSpeed, 1 + Math.log2(Math.max(1, body.civ.population / config.seedPopulation)) * .25);
   }
+  // 轨道环间距：留出更宽的视觉空隙。
+  const CITY0 = 12, CITY1 = 26, SHIELD = 8, GUN = 24, CARRIER = 44;
+  function outerRing(body) {
+    const c = body.civ;
+    return c.cities[1].hp > 0 ? body.radius + CITY1 : c.cities[0].hp > 0 ? body.radius + CITY0 : body.radius;
+  }
   function rings(body) {
-    const first = body.civ.cities[0].hp > 0, second = body.civ.cities[1].hp > 0;
-    const city0 = body.radius + 8, city1 = body.radius + 16;
-    const outer = second ? city1 : first ? city0 : body.radius;
-    return { city0, city1, shield: outer + 6, gun: outer + 18, carrier: outer + 34, outer };
+    const outer = outerRing(body);
+    return { city0: body.radius + CITY0, city1: body.radius + CITY1, shield: outer + SHIELD, gun: outer + GUN, carrier: outer + CARRIER, outer };
   }
   function collisionRadius(body) {
     if (body.natural) return body.radius;
-    const c = body.civ, cityRadius = c.cities[1].hp > 0 ? 16 : c.cities[0].hp > 0 ? 8 : 0;
-    return body.radius + cityRadius + (c.shield > 0 ? 6 : 0);
+    // 碰撞体积与视觉外缘一致：有护盾时取护盾环，否则取最外层已建城市环。
+    const outer = outerRing(body);
+    return body.civ.shield > 0 ? outer + SHIELD : outer;
   }
   function hasProducts(body) {
     return body.civ.shield > 0 || body.civ.cities.some(city => city.hp > 0) || body.artifacts.some(unit => unit.alive);
