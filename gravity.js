@@ -2,7 +2,7 @@
 
 globalThis.SolarGravity = (() => {
   const config = SolarConfig.gravity;
-  const mass = body => body.mass + body.cityMass;
+  const mass = body => body.mass;
   const participates = body => body.alive && !body.entity;
   const range = body => SolarConfig.types[body.type].gravityRange * (body.isPlayer ? config.playerRangeScale : 1);
   const captureRange = body => body.natural || body.type === 0 ? 0 : range(body) * SolarConfig.capture.rangeRatio;

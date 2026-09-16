@@ -30,6 +30,20 @@ kbd{font-size:10px;margin-left:12px;color:#718397}
 .brand-mark{font-size:30px;color:#a2d9df}
 .english{font-size:15px;letter-spacing:4px;color:#a2d9df}
 .telemetry{position:absolute;top:80px;left:32px;width:210px;pointer-events:none}
+.telemetry{max-height:calc(100dvh - 110px);overflow-y:auto;scrollbar-width:thin;pointer-events:auto}
+#artifacts-panel{grid-column:1 / -1;margin-top:12px;border-top:1px solid #ffffff18;font-size:10px;color:#9bb0c3}
+#artifacts-panel summary{padding:10px 0;cursor:pointer;user-select:none;touch-action:manipulation}
+#artifacts-panel[open]{background:#050911dc}
+#artifacts-list{max-height:min(240px,28dvh);overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin;scrollbar-color:#71839750 transparent;padding-right:5px;touch-action:pan-y}
+#artifacts-list:focus-visible{outline:1px solid #62dcc9;outline-offset:-1px}
+.artifact-row{padding:8px 0;border-top:1px solid #ffffff0c;font-variant-numeric:tabular-nums}
+.artifact-heading,.artifact-reading{display:flex;justify-content:space-between;align-items:baseline;gap:6px}
+.artifact-name{font-weight:400;color:#c1d3df}.artifact-state{text-align:right;font-size:9px;color:#718397}
+.artifact-reading{margin-top:5px;font-size:9px;color:#91a6ba}
+.artifact-track{height:2px;margin-top:5px;background:#ffffff12}
+.artifact-track i{display:block;height:100%;background:#62dcc9}
+.artifact-extra{margin-top:5px;font-size:9px;color:#718397;line-height:1.5}
+#artifacts-empty{margin:0;padding:6px 0 12px;color:#718397}
 .eyebrow{font-size:9px;letter-spacing:2.6px;color:#657a8e}
 .stage-line{display:flex;align-items:center;gap:9px}
 .stage-line h1{font-size:16px;font-weight:400;letter-spacing:.5px;overflow-wrap:anywhere;margin:0;line-height:1.4}

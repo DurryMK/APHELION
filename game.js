@@ -57,6 +57,7 @@
   const clamp = (n, a, b) => Math.max(a, Math.min(b, n));
   const satelliteLimit = type => TYPES[type].natural || type === 0 ? 0 : Math.min(6, Math.max(2, TYPES[type].level + 1));
   const bodyMass = GRAVITY.mass;
+  const startingMass = type => (type === 0 ? 8 : TYPES[type].min) * 1.3;
   const isPlanet = body => !body.natural && body.type > 0;
   function limitPlayerSpeed() {
     GRAVITY.limitVelocity(player);
@@ -71,7 +72,7 @@
     if (body.natural) { body.radius = TYPES[body.type].radius * (.7 + .3 * Math.min(1, body.mass / TYPES[body.type].mass)); return; }
     body.type = typeOf(body.mass);
     const base = TYPES[body.type];
-    const upper = body.type < 7 ? TYPES[body.type + 1].min : CONFIG.maxPlanetMass;
+    const upper = body.type < 7 ? TYPES[body.type + 1].min : CONFIG.planetSizeSaturationMass;
     body.radius = base.radius + clamp((body.mass - base.min) / (upper - base.min), 0, 1) * 0.3;
     CIV.sync(body);
   }
@@ -85,7 +86,7 @@
 
   function createBody(x, y, mass, velocity = initialVelocity(mass), naturalType = null) {
     const { vx, vy } = velocity;
-    const body = { id: nextId++, x, y, px: x, py: y, vx, vy, ax: 0, ay: 0, mass, cityMass: 0, healthyMass: mass, integrity: 1, natural: naturalType !== null, type: naturalType, civ: CIV.create(), artifacts: [], kills: { planet: 0, mothership: 0 }, nextAttack: 0, nextAbsorb: 0, recallUntil: 0, hazardReady: 0, alive: true, trail: [], trailAt: 0, host: null, orbitRadius: 0, orbitDirection: 1, captureAfter: 0, cooldown: 0, phase: random(0, Math.PI * 2) };
+    const body = { id: nextId++, x, y, px: x, py: y, vx, vy, ax: 0, ay: 0, mass, healthyMass: mass, integrity: 1, natural: naturalType !== null, type: naturalType, civ: CIV.create(), artifacts: [], kills: { planet: 0, mothership: 0 }, nextAttack: 0, nextAbsorb: 0, recallUntil: 0, hazardReady: 0, alive: true, trail: [], trailAt: 0, host: null, orbitRadius: 0, orbitDirection: 1, captureAfter: 0, cooldown: 0, phase: random(0, Math.PI * 2) };
     updateSize(body);
     bodies.push(body);
     return body;
@@ -184,7 +185,7 @@
     } else {
       let type = weightedIndex(POPULATION.planetWeights) + 2;
       if (type >= 5 && bodies.filter(b => b.alive && !b.natural && b.mass >= TYPES[5].min).length >= POPULATION.largePlanetLimit) type = 2 + weightedIndex([6, 3, 1]);
-      mass = random(TYPES[type].min, type < 7 ? TYPES[type + 1].min - 1 : CONFIG.maxPlanetMass);
+      mass = random(TYPES[type].min, type < 7 ? TYPES[type + 1].min - 1 : CONFIG.planetSizeSaturationMass);
     }
     const body = createBody(position.x, position.y, mass);
     if (CIV.eligible(body)) {
@@ -216,7 +217,7 @@
     universeSeed = Math.floor(Math.random() * 4294967296);
     regions = SolarRegions.create(regionRandom); activeRegions = []; seededSystems = new Set();
     selectedSatelliteId = null; satelliteClickAt = -Infinity;
-    const startMass = startType === 0 ? 8 : TYPES[startType].min;
+    const startMass = startingMass(startType);
     player = createBody(0, 0, startMass);
     player.isPlayer = true;
     fleets = createCivilianFleet();
@@ -325,12 +326,7 @@
 
   function gainMass(body, amount) {
     const oldType = body.type;
-    const available = Math.max(0, CONFIG.maxPlanetMass - body.mass);
-    body.mass += Math.min(available, amount);
-    const overflow = Math.max(0, amount - available);
-    const outer = body.civ.cities[1].mass > 0 ? 1 : 0;
-    body.civ.cities[outer].mass += overflow;
-    CIV.syncCities(body);
+    body.mass += amount;
     body.integrity = Math.min(1, (Math.max(0, bodyMass(body) - amount) * body.integrity + amount) / bodyMass(body));
     body.healthyMass = Math.max(body.healthyMass, bodyMass(body));
     updateSize(body);
@@ -373,6 +369,7 @@
       announce("Hostile fire detected");
     }
     if (target.entity) {
+      target.lastHit = time;
       const previousHit = target.impact;
       target.impact = { at: time, angle: attacker ? Math.atan2(attacker.y - target.y, attacker.x - target.x) : 0, shield: false };
       if ((!previousHit || time - previousHit.at > .12) && !outsideView(target.x, target.y)) burst(target.x, target.y, "#ffdba1", 4, 18);
@@ -392,11 +389,12 @@
     amount -= shieldLoss;
     if (amount <= 0) return;
     for (let i = 1; i >= 0 && amount > 0; i--) {
-      const city = c.cities[i], before = bodyMass(target), loss = Math.min(city.mass, amount);
-      city.mass -= loss; amount -= loss;
-      if (city.mass === 0) { city.built = false; c.projects["city" + i] = 0; }
+      const city = c.cities[i], loss = Math.min(city.hp, amount);
+      city.hp -= loss; amount -= loss;
+      if (loss > 0) city.lastHit = time;
+      if (city.hp === 0) { city.built = false; c.projects["city" + i] = 0; }
       CIV.syncCities(target);
-      if (loss > 0) CIV.suffer(target, loss / Math.max(1, before));
+      if (loss > 0) CIV.suffer(target, loss / city.maxHp * .3);
     }
     if (amount <= 0) { updateSize(target); return; }
     const before = target.mass, loss = Math.min(before, amount);
@@ -849,10 +847,10 @@
   function playerSnapshot() {
     const c = player.civ;
     return {
-      version: 3, savedAt: Date.now(), mass: player.mass, cityMass: player.cityMass, vx: player.vx, vy: player.vy,
+      version: 4, savedAt: Date.now(), mass: player.mass, vx: player.vx, vy: player.vy,
       healthyMass: player.healthyMass, integrity: player.integrity, peakMass, absorbed, elapsed: time, distance: driftDistance,
       recallRemaining: Math.max(0, player.recallUntil - time),
-      civ: { ...c, cities: c.cities.map(city => ({ ...city })), projects: { ...c.projects },
+      civ: { ...c, cities: c.cities.map(city => ({ ...city, lastHit: Math.min(10, time - city.lastHit) })), projects: { ...c.projects },
         lastHit: Math.min(10, time - c.lastHit), coreHitUntil: Math.max(0, c.coreHitUntil - time) },
       fleet: fleets.snapshot(player, time),
       kills: { planet: player.kills.planet, mothership: player.kills.mothership }
@@ -860,26 +858,27 @@
   }
 
   function validSnapshot(s) {
-    if (!s || s.version !== 3 || !s.civ || !s.kills || !s.fleet) return false;
+    if (!s || s.version !== 4 || !s.civ || !s.kills || !s.fleet) return false;
     const c = s.civ, f = s.fleet;
     const positive = values => values.every(n => typeof n === "number" && Number.isFinite(n) && n >= 0);
-    if (!positive([s.savedAt, s.mass, s.cityMass, s.healthyMass, s.integrity, s.peakMass, s.absorbed, s.elapsed, s.distance,
+    if (!positive([s.savedAt, s.mass, s.healthyMass, s.integrity, s.peakMass, s.absorbed, s.elapsed, s.distance,
       s.recallRemaining, c.population, c.tech, c.research, c.shield, c.lastHit, c.coreHitUntil,
       c.incubation, c.pressure, c.consumption, s.kills.planet, s.kills.mothership])) return false;
-    if (![s.vx, s.vy].every(Number.isFinite) || s.mass < .6 || s.mass > CONFIG.maxPlanetMass ||
+    if (![s.vx, s.vy].every(Number.isFinite) || s.mass < .6 ||
         s.integrity < 1 - CONFIG.combat.breakLoss || s.integrity > 1 || !Number.isInteger(c.tech) || c.tech > 7) return false;
     if (typeof c.extinct !== "boolean" || typeof c.city !== "boolean" || c.population > 0 && c.population < CONFIG.civilization.extinctionPopulation) return false;
     if (!Array.isArray(c.cities) || c.cities.length !== 2 || !c.projects) return false;
-    if (!c.cities.every(city => city && positive([city.mass]) && typeof city.built === "boolean" && (!city.built || city.mass > 0))) return false;
-    if (Math.abs(c.cities.reduce((sum, city) => sum + city.mass, 0) - s.cityMass) > .00001) return false;
-    if (c.city !== c.cities.some(city => city.built && city.mass > 0)) return false;
+    if (!c.cities.every((city, i) => city && positive([city.hp, city.maxHp, city.lastHit]) &&
+        city.maxHp === CONFIG.fleet.construction.cityHp[i] && city.hp <= city.maxHp &&
+        typeof city.built === "boolean" && (!city.built || city.hp > 0))) return false;
+    if (c.city !== c.cities.some(city => city.built && city.hp > 0)) return false;
     if (!["shield", "gun", "carrier", "city0", "city1"].every(key => positive([c.projects[key]]) && c.projects[key] <= 1)) return false;
-    if (c.shield > CIV.stats({ civ: c }).shield || c.population === 0 && (c.tech > 0 || c.shield > 0 || s.cityMass > 0)) return false;
+    if (c.shield > CIV.stats({ civ: c }).shield || c.population === 0 && (c.tech > 0 || c.shield > 0 || c.cities.some(city => city.hp > 0))) return false;
     if (!Array.isArray(f.facilities) || !Array.isArray(f.planes) || f.facilities.length > 6 || f.planes.length > 12) return false;
     const slots = new Set();
     for (const u of f.facilities) {
       if (!u || !["carrier", "gun"].includes(u.entity) || !u.orbitMotion ||
-          !positive([u.slot, u.hp, u.maxHp, u.buildProgress, u.launchRemaining, u.attackRemaining]) ||
+          !positive([u.slot, u.hp, u.maxHp, u.hitAgo, u.buildProgress, u.launchRemaining, u.attackRemaining]) ||
           !Number.isInteger(u.slot) || u.slot > 2 || u.hp <= 0 || u.hp > u.maxHp || u.buildProgress > 1 ||
           ![u.orbitMotion.x, u.orbitMotion.y, u.orbitMotion.vx, u.orbitMotion.vy].every(Number.isFinite)) return false;
       if (c.tech < (u.entity === "gun" ? 2 : 3) || slots.has(u.entity + u.slot)) return false;
@@ -888,10 +887,10 @@
     const spec = CONFIG.fleet.grades[Math.min(3, Math.max(0, c.tech - 3))];
     for (const p of f.planes) {
       if (!p || !slots.has("carrier" + p.motherSlot) || ![p.x, p.y, p.vx, p.vy].every(Number.isFinite) ||
-          !positive([p.hp, p.shots, p.cargo, p.readyRemaining, p.flightAge, p.enduranceRemaining, p.attackRemaining]) ||
+          !positive([p.hp, p.hitAgo, p.shots, p.cargo, p.readyRemaining, p.flightAge, p.enduranceRemaining, p.attackRemaining]) ||
           p.hp <= 0 || p.hp > spec.hp || p.cargo > spec.cargo || p.shots > spec.ammo || typeof p.docked !== "boolean") return false;
     }
-    return s.healthyMass + .00001 >= s.mass + s.cityMass && s.peakMass + .00001 >= s.mass + s.cityMass;
+    return s.healthyMass + .00001 >= s.mass && s.peakMass + .00001 >= s.mass;
   }
 
   function readSave() {
@@ -919,9 +918,9 @@
   }
 
   function restorePlayer(snapshot) {
-    player.mass = snapshot.mass; player.cityMass = snapshot.cityMass; player.healthyMass = snapshot.healthyMass; player.integrity = snapshot.integrity;
+    player.mass = snapshot.mass; player.healthyMass = snapshot.healthyMass; player.integrity = snapshot.integrity;
     time = snapshot.elapsed; peakMass = snapshot.peakMass; absorbed = snapshot.absorbed; driftDistance = snapshot.distance;
-    player.civ = { ...snapshot.civ, cities: snapshot.civ.cities.map(city => ({ ...city })), projects: { ...snapshot.civ.projects },
+    player.civ = { ...snapshot.civ, cities: snapshot.civ.cities.map(city => ({ ...city, lastHit: time - city.lastHit })), projects: { ...snapshot.civ.projects },
       lastHit: time - snapshot.civ.lastHit, coreHitUntil: time + snapshot.civ.coreHitUntil };
     player.kills = { planet: snapshot.kills.planet, mothership: snapshot.kills.mothership };
     player.recallUntil = time + snapshot.recallRemaining; nextPopulation = time + 2;
@@ -1072,7 +1071,7 @@
       circle(x + Math.cos(angle) * r * .65, y + Math.sin(angle) * r * .65, .55 * camera.zoom, "#fff4bb");
     }
     for (let layer = 0; layer < 2; layer++) {
-      const city = c.cities[layer]; if (city.mass <= 0) continue;
+      const city = c.cities[layer]; if (city.hp <= 0) continue;
       const outer = ring["city" + layer] * camera.zoom;
       const thickness = (city.built ? 2.6 + layer * .4 : .8) * camera.zoom;
       const radius = outer - thickness / 2;
@@ -1391,8 +1390,10 @@
     SolarLanguage.text(document.getElementById("fleet-stat"), `${fleetStatus.mothers} / ${fleetStatus.total}`);
     document.getElementById("fleet-actions").hidden = ended || paused || choosingStart || c.tech < 3;
     SolarLanguage.text(document.getElementById("shield-stat"), `${c.shield.toFixed(1)} / ${CIV.stats(player).shield}`);
-    SolarLanguage.text(document.getElementById("city-stat"), player.cityMass.toFixed(1));
-    document.getElementById("city-row").hidden = player.cityMass <= 0 && !c.city;
+    const cityHp = c.cities.reduce((sum, city) => sum + city.hp, 0);
+    const cityMaxHp = c.cities.reduce((sum, city) => sum + (city.hp > 0 ? city.maxHp : 0), 0);
+    SolarLanguage.text(document.getElementById("city-stat"), cityHp.toFixed(1) + " / " + cityMaxHp.toFixed(1));
+    document.getElementById("city-row").hidden = cityHp <= 0 && !c.city;
     SolarLanguage.text(document.getElementById("planet-kills"), format(player.kills.planet));
     SolarLanguage.text(document.getElementById("nest-kills"), format(player.kills.mothership));
     const satellites = bodies.filter(b => b.alive && b.host === player.id);
@@ -1402,6 +1403,7 @@
     SolarLanguage.text(ui["next-stage"], growth.label);
     SolarLanguage.text(ui["progress-text"], `${Math.floor(percent)}%`); ui.progress.style.width = `${percent}%`;
     ui.progress.style.background = type.color;
+    SolarArtifacts.refresh(player, time);
   }
 
   function togglePause() {
@@ -1487,6 +1489,10 @@
   canvas.addEventListener("contextmenu", event => { event.preventDefault(); });
   canvas.addEventListener("wheel", event => { event.preventDefault(); camera.targetZoom = clamp(camera.targetZoom * Math.exp(-event.deltaY * .001), .5, 2.5); }, { passive: false });
   ui.pause.addEventListener("click", togglePause);
+  document.getElementById("artifacts-panel").addEventListener("toggle", () => SolarArtifacts.refresh(player, time));
+  document.getElementById("artifacts-panel").addEventListener("keydown", event => {
+    if (event.code === "Space" || event.code.startsWith("Arrow")) event.stopPropagation();
+  });
   document.getElementById("touch-pause").addEventListener("click", togglePause);
   document.getElementById("recall-fleet").addEventListener("click", recallFleet);
   document.getElementById("touch-trail").addEventListener("click", toggleOrbits);
@@ -1503,7 +1509,7 @@
   function updateStartSummary() {
     const index = Number(startForm.elements.namedItem("start-type").value);
     const type = TYPES[index];
-    SolarLanguage.text(document.getElementById("start-summary"), `${type.name} · Mass ${index === 0 ? 8 : type.min} · Room for ${satelliteLimit(index)} moons`);
+    SolarLanguage.text(document.getElementById("start-summary"), `${type.name} · Mass ${startingMass(index).toFixed(1)} · Room for ${satelliteLimit(index)} moons`);
   }
   function openStartSelection() {
     choosingStart = true; accumulator = 0; clearMovement();
@@ -1580,7 +1586,7 @@
     const input = document.createElement("input");
     input.type = "radio"; input.name = "start-type"; input.value = String(index); input.checked = index === 0;
     const caption = document.createElement("span"); SolarLanguage.text(caption, type.name);
-    const detail = document.createElement("small"); SolarLanguage.text(detail, `Mass ${index === 0 ? 8 : type.min}`);
+    const detail = document.createElement("small"); SolarLanguage.text(detail, `Mass ${startingMass(index).toFixed(1)}`);
     caption.append(detail); label.append(input, caption); startTypes.append(label);
   }
   const flavorLines = [

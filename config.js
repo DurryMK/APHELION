@@ -14,7 +14,7 @@ globalThis.SolarConfig = {
     { name: "Pulsar", mass: 14000, radius: 3, color: "#a28aff", kind: "neutron", natural: true, gravityRange: 330, hazardRange: 32 },
     { name: "Void", mass: 24000, radius: 5, color: "#c49aff", kind: "black-hole", natural: true, gravityRange: 380, hazardRange: 40 }
   ],
-  maxPlanetMass: 3200,
+  planetSizeSaturationMass: 3200,
   regions: { size: 1600, radius: 560, beltChance: .32, nestChance: .18, systemChance: .16, decorationCount: 64 },
   populationTitles: [
     { population: 1e7, name: "Dawn" }, { population: 2e7, name: "Hearth" },
@@ -57,17 +57,19 @@ globalThis.SolarConfig = {
     mothershipResearchReward: 8
   },
   fleet: {
-    construction: { shield: 60, gun: 25, carrier: 40, city: 90, cityMass: [40, 80], maxSpeed: 4 },
+    construction: { shield: 60, gun: 25, carrier: 40, city: 90, maxSpeed: 4,
+      cost: { gun: 8, carrier: 20, city: [40, 80] }, cityHp: [200, 350] },
+    repair: { delay: 5, fraction: .03, dockedFraction: .15, fullCostRatio: .6 },
     gunLimit: 3, gunHp: 100, carrierHp: 180, threatMemory: 5,
     decisionInterval: .2, searchInterval: .8, recallSeconds: 10, activeCivilizations: 5,
     activationRadius: 1100, searchCell: 180,
     steering: .9, acceleration: 24, carrierOrbitSpeed: .07,
     patrolRatio: 1 / 3, patrolRangeRatio: .35, patrolOrbitSpeed: .1, stableSeconds: 4, stableAcceleration: 4,
     grades: [
-      { mothers: 1, perMother: 3, hp: 12, damage: 1, interval: .4, ammo: 20, range: 260, attackRange: 65, cargo: 4, mining: 1, speed: 65, supply: 3, production: 12, endurance: 45 },
-      { mothers: 3, perMother: 4, hp: 16, damage: 1.2, interval: .4, ammo: 24, range: 360, attackRange: 75, cargo: 8, mining: 2, speed: 80, supply: 3, production: 11, endurance: 55 },
-      { mothers: 3, perMother: 4, hp: 20, damage: 1.5, interval: .35, ammo: 30, range: 440, attackRange: 85, cargo: 12, mining: 3, speed: 95, supply: 2, production: 10, endurance: 65 },
-      { mothers: 3, perMother: 4, hp: 36, damage: 2.5, interval: .3, ammo: 40, range: 600, attackRange: 95, cargo: 24, mining: 6, speed: 115, supply: 1.5, production: 9, endurance: 80 }
+      { mothers: 1, perMother: 3, hp: 12, damage: 1, interval: .4, ammo: 20, range: 260, attackRange: 65, cargo: 4, mining: 1, speed: 65, supply: 3, production: 12, cost: 1, endurance: 45 },
+      { mothers: 3, perMother: 4, hp: 16, damage: 1.2, interval: .4, ammo: 24, range: 360, attackRange: 75, cargo: 8, mining: 2, speed: 80, supply: 3, production: 11, cost: 1.5, endurance: 55 },
+      { mothers: 3, perMother: 4, hp: 20, damage: 1.5, interval: .35, ammo: 30, range: 440, attackRange: 85, cargo: 12, mining: 3, speed: 95, supply: 2, production: 10, cost: 2, endurance: 65 },
+      { mothers: 3, perMother: 4, hp: 36, damage: 2.5, interval: .3, ammo: 40, range: 600, attackRange: 95, cargo: 24, mining: 6, speed: 115, supply: 1.5, production: 9, cost: 3, endurance: 80 }
     ]
   },
   population: {
@@ -92,5 +94,5 @@ globalThis.SolarConfig = {
     patrolRadius: 110, patrolOrbitSpeed: .12, acceleration: 16, steering: .8,
     mothershipRange: 150, mothershipDamage: 4, mothershipInterval: 2
   },
-  saveKey: "aphelion-civilization-save-v3"
+  saveKey: "aphelion-civilization-save-v4"
 };

@@ -82,7 +82,7 @@ globalThis.SolarFleet = {
       const hp = (entity === "gun" ? cfg.gunHp : cfg.carrierHp) * (1 + owner.civ.tech * .15);
       const unit = { id: context.id(), entity, ownerId: owner.id, owner, slot,
         x: owner.x + x, y: owner.y + y, vx: owner.vx, vy: owner.vy, radius: entity === "gun" ? 3.5 : 6, alive: true,
-        hp, maxHp: hp, aim: angle, buildProgress: 0, nextLaunch: now, nextAttack: now,
+        hp, maxHp: hp, aim: angle, lastHit: -Infinity, buildProgress: 0, nextLaunch: now, nextAttack: now,
         orbitMotion: { x, y, vx: -y * cfg.carrierOrbitSpeed, vy: x * cfg.carrierOrbitSpeed } };
       owner.artifacts.push(unit); return unit;
     }
@@ -112,8 +112,7 @@ globalThis.SolarFleet = {
         owner.artifacts = owner.artifacts.filter(u => u.alive);
         group.planes = group.planes.filter(p => p.alive);
         for (const plane of group.planes) {
-          const ratio = plane.hp / plane.maxHp;
-          plane.maxHp = spec.hp; plane.hp = Math.min(spec.hp, ratio * spec.hp);
+          plane.maxHp = spec.hp; plane.hp = Math.min(spec.hp, plane.hp);
           plane.radius = owner.civ.tech >= 6 ? 3 : 2.5;
           plane.shots = Math.min(plane.shots, spec.ammo);
           if (!plane.mother.alive) { plane.alive = false; plane.cargo = 0; }
@@ -175,15 +174,15 @@ globalThis.SolarFleet = {
       else if (c.tech >= 6 && !c.cities[1].built) kind = "city1";
       if (!kind) return;
       if (kind.startsWith("city")) {
-        const index = Number(kind[4]), city = c.cities[index], cost = cfg.construction.cityMass[index];
-        const progress = Math.min(1 - project[kind], elapsed / cfg.construction.city,
-          Math.max(0, owner.mass - SolarConfig.civilization.minimumMass) / cost);
-        owner.mass -= progress * cost; city.mass += progress * cost; project[kind] += progress;
+        const index = Number(kind[4]), city = c.cities[index], cost = cfg.construction.cost.city[index];
+        const progress = CIV.fund(owner, Math.min(1 - project[kind], elapsed / cfg.construction.city), cost);
+        city.hp = Math.min(city.maxHp, city.hp + progress * city.maxHp); project[kind] += progress;
         if (project[kind] >= 1 - 1e-9) { city.built = true; project[kind] = 0; }
         CIV.syncCities(owner); context.resize(owner); return;
       }
-      project[kind] += elapsed / cfg.construction[kind];
-      if (project[kind] < 1) return;
+      const progress = Math.min(1 - project[kind], elapsed / cfg.construction[kind]);
+      project[kind] += kind === "shield" ? progress : CIV.fund(owner, progress, cfg.construction.cost[kind]);
+      if (project[kind] < 1 - 1e-9) return;
       project[kind] = 0;
       if (kind === "shield") { c.shield = CIV.stats(owner).shield; return; }
       const list = kind === "gun" ? group.guns : group.mothers;
@@ -199,6 +198,9 @@ globalThis.SolarFleet = {
           continue;
         }
         const owner = group.owner, spec = grade(owner), rate = launchRate(owner, spec);
+        if (group.enabled) for (const facility of [...group.mothers, ...group.guns]) {
+          if (facility.alive) CIV.repair(owner, facility, cfg.decisionInterval, now, cfg.construction.cost[facility.entity]);
+        }
         buildStructures(group, now);
         const elapsed = now - group.motionAt;
         if (elapsed > 0 && Math.hypot(owner.vx - group.lastVx, owner.vy - group.lastVy) / elapsed > cfg.stableAcceleration) group.stableSince = now;
@@ -211,12 +213,13 @@ globalThis.SolarFleet = {
         for (const mother of group.mothers) {
           if (!mother.alive || !group.enabled || now < owner.civ.coreHitUntil) continue;
           if (group.planes.filter(p => p.alive && p.mother === mother).length >= spec.perMother) continue;
-          mother.buildProgress += cfg.decisionInterval * CIV.buildSpeed(owner) / spec.production;
-          if (mother.buildProgress < 1) continue;
+          mother.buildProgress += CIV.fund(owner, Math.min(1 - mother.buildProgress,
+            cfg.decisionInterval * CIV.buildSpeed(owner) / spec.production), spec.cost);
+          if (mother.buildProgress < 1 - 1e-9) continue;
 
           const plane = { id: context.id(), entity: "drone", ownerId: owner.id, owner, mother,
             x: mother.x, y: mother.y, vx: 0, vy: 0, radius: owner.civ.tech >= 6 ? 3 : 2.5,
-            hp: spec.hp, maxHp: spec.hp, alive: true, mode: "dock", readyAt: now + spec.supply,
+            hp: spec.hp, maxHp: spec.hp, lastHit: -Infinity, alive: true, mode: "dock", readyAt: now + spec.supply,
             shots: spec.ammo, cargo: 0, departed: now, expires: now, nextAttack: now,
             nextSearch: now + (mother.slot * .13), target: null, retiring: false, patrol: false };
           group.planes.push(plane); units.push(plane); owner.artifacts.push(plane); mother.buildProgress = 0;
@@ -227,8 +230,10 @@ globalThis.SolarFleet = {
           const mother = plane.mother;
           if (plane.mode === "dock") {
             if (plane.retiring) { plane.alive = false; continue; }
+            if (group.enabled) CIV.repair(owner, plane, cfg.decisionInterval, now, spec.cost, true);
             if (now < plane.readyAt) continue;
-            plane.hp = spec.hp; plane.shots = spec.ammo;
+            plane.shots = spec.ammo;
+            if (plane.hp < spec.hp - .000001) continue;
             if (!group.enabled || now < owner.recallUntil || rate <= 0 || now < mother.nextLaunch || now < plane.nextSearch) continue;
             plane.patrol = patrolCount < patrolLimit;
             if (plane.patrol) {
@@ -271,6 +276,7 @@ globalThis.SolarFleet = {
           } else { plane.target = null; plane.mode = "return"; }
         }
       }
+      for (const group of groups.values()) if (!group.sleeping && group.owner.alive) context.resize(group.owner);
       units = units.filter(u => u.alive);
     }
     function move(dt, now) {
@@ -325,10 +331,10 @@ globalThis.SolarFleet = {
       if (!group || owner.civ.population === 0) return { facilities: [], planes: [] };
       return {
         facilities: [...group.mothers, ...group.guns].filter(u => u.alive).map(u => ({ entity: u.entity, slot: u.slot,
-          hp: u.hp, maxHp: u.maxHp, buildProgress: u.buildProgress, orbitMotion: { ...u.orbitMotion },
+          hp: u.hp, maxHp: u.maxHp, hitAgo: Math.min(10, now - u.lastHit), buildProgress: u.buildProgress, orbitMotion: { ...u.orbitMotion },
           launchRemaining: Math.max(0, u.nextLaunch - now), attackRemaining: Math.max(0, u.nextAttack - now) })),
         planes: group.planes.filter(p => p.alive && p.mother.alive).map(p => ({ motherSlot: p.mother.slot,
-          x: p.x - owner.x, y: p.y - owner.y, vx: p.vx, vy: p.vy, hp: p.hp, shots: p.shots, cargo: p.cargo,
+          x: p.x - owner.x, y: p.y - owner.y, vx: p.vx, vy: p.vy, hp: p.hp, hitAgo: Math.min(10, now - p.lastHit), shots: p.shots, cargo: p.cargo,
           docked: p.mode === "dock", readyRemaining: Math.max(0, p.readyAt - now),
           flightAge: Math.max(0, now - p.departed), enduranceRemaining: Math.max(0, p.expires - now),
           attackRemaining: Math.max(0, p.nextAttack - now) }))
@@ -341,7 +347,7 @@ globalThis.SolarFleet = {
       const spec = grade(owner);
       for (const item of saved.facilities) {
         const unit = makeFacility(owner, item.slot, now, item.entity);
-        unit.hp = item.hp; unit.maxHp = item.maxHp; unit.buildProgress = item.buildProgress;
+        unit.hp = item.hp; unit.maxHp = item.maxHp; unit.lastHit = now - item.hitAgo; unit.buildProgress = item.buildProgress;
         unit.orbitMotion = { ...item.orbitMotion }; unit.x = owner.x + item.orbitMotion.x; unit.y = owner.y + item.orbitMotion.y;
         unit.nextLaunch = now + item.launchRemaining; unit.nextAttack = now + item.attackRemaining;
         (item.entity === "gun" ? group.guns : group.mothers).push(unit); units.push(unit);
@@ -350,7 +356,7 @@ globalThis.SolarFleet = {
         const mother = group.mothers.find(m => m.slot === item.motherSlot);
         const plane = { id: context.id(), entity: "drone", ownerId: owner.id, owner, mother,
           x: owner.x + item.x, y: owner.y + item.y, vx: item.vx, vy: item.vy, radius: owner.civ.tech >= 6 ? 3 : 2.5,
-          hp: item.hp, maxHp: spec.hp, alive: true, mode: item.docked ? "dock" : "return",
+          hp: item.hp, maxHp: spec.hp, lastHit: now - item.hitAgo, alive: true, mode: item.docked ? "dock" : "return",
           readyAt: now + item.readyRemaining, shots: item.shots, cargo: item.cargo,
           departed: now - item.flightAge, expires: now + item.enduranceRemaining, nextAttack: now + item.attackRemaining,
           nextSearch: now, target: null, retiring: false, patrol: false };

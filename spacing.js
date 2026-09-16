@@ -28,8 +28,8 @@ globalThis.SolarSpacing = {
             if (distance >= minimum) continue;
             const angle = (unit.id + other.id) * 2.4;
             const nx = distance > 0 ? dx / distance : Math.cos(angle), ny = distance > 0 ? dy / distance : Math.sin(angle);
-            const weightA = unit.entity ? 1 : unit.mass + unit.cityMass;
-            const weightB = other.entity ? 1 : other.mass + other.cityMass;
+            const weightA = unit.entity ? 1 : unit.mass;
+            const weightB = other.entity ? 1 : other.mass;
             const share = weightB / (weightA + weightB), overlap = minimum - distance;
             shift(unit, nx * overlap * share, ny * overlap * share);
             shift(other, -nx * overlap * (1 - share), -ny * overlap * (1 - share));

@@ -2,21 +2,20 @@
 
 globalThis.SolarCivilization = (() => {
   const config = SolarConfig.civilization;
-  const totalMass = body => body.mass + body.cityMass;
+  const totalMass = body => body.mass;
   const eligible = body => !body.natural && body.mass >= 24;
   function create() {
     return { population: 0, tech: 0, research: 0, shield: 0, lastHit: -Infinity, coreHitUntil: 0,
       incubation: 0, extinct: false, city: false, pressure: 0, consumption: 0,
-      cities: [{ mass: 0, built: false }, { mass: 0, built: false }],
+      cities: SolarConfig.fleet.construction.cityHp.map(maxHp => ({ hp: 0, maxHp, built: false, lastHit: -Infinity })),
       projects: { shield: 0, gun: 0, carrier: 0, city0: 0, city1: 0 } };
   }
   function syncCities(body) {
-    body.cityMass = body.civ.cities.reduce((sum, city) => sum + city.mass, 0);
-    body.civ.city = body.civ.cities.some(city => city.built && city.mass > 0);
+    body.civ.city = body.civ.cities.some(city => city.built && city.hp > 0);
   }
   function stats(body) {
     const base = config.technology[body.civ.tech];
-    const cities = body.civ.cities.filter(city => city.built && city.mass > 0).length;
+    const cities = body.civ.cities.filter(city => city.built && city.hp > 0).length;
     return { ...base, shield: base.shield * (1 + cities * .4) };
   }
   function pressure(body) {
@@ -27,37 +26,41 @@ globalThis.SolarCivilization = (() => {
     return Math.min(SolarConfig.fleet.construction.maxSpeed, 1 + Math.log2(Math.max(1, body.civ.population / config.seedPopulation)) * .25);
   }
   function rings(body) {
-    const first = body.civ.cities[0].mass > 0, second = body.civ.cities[1].mass > 0;
+    const first = body.civ.cities[0].hp > 0, second = body.civ.cities[1].hp > 0;
     const city0 = body.radius + 8, city1 = body.radius + 16;
     const outer = second ? city1 : first ? city0 : body.radius;
     return { city0, city1, shield: outer + 6, gun: outer + 18, carrier: outer + 34, outer };
   }
   function collisionRadius(body) {
     if (body.natural) return body.radius;
-    const c = body.civ, cityRadius = c.cities[1].mass > 0 ? 16 : c.cities[0].mass > 0 ? 8 : 0;
+    const c = body.civ, cityRadius = c.cities[1].hp > 0 ? 16 : c.cities[0].hp > 0 ? 8 : 0;
     return body.radius + cityRadius + (c.shield > 0 ? 6 : 0);
   }
   function hasProducts(body) {
-    return body.civ.shield > 0 || body.cityMass > 0 || body.artifacts.some(unit => unit.alive);
+    return body.civ.shield > 0 || body.civ.cities.some(city => city.hp > 0) || body.artifacts.some(unit => unit.alive);
   }
   function extinguish(body) {
     for (const unit of body.artifacts) { unit.alive = false; if (unit.entity === "drone") unit.cargo = 0; }
     body.artifacts = [];
     const blockedUntil = body.civ.coreHitUntil;
     Object.assign(body.civ, create(), { extinct: true, coreHitUntil: blockedUntil });
-    body.cityMass = 0;
     body.extinctionEvent = true;
   }
   function spend(body, amount, floor = config.minimumMass) {
-    let remaining = Math.max(0, amount);
-    const core = Math.min(Math.max(0, body.mass - floor), remaining);
-    body.mass -= core; remaining -= core;
-    for (let i = 1; i >= 0 && remaining > 0; i--) {
-      const city = body.civ.cities[i], taken = Math.min(city.mass, remaining);
-      city.mass -= taken; remaining -= taken;
-      if (city.mass === 0) { city.built = false; body.civ.projects["city" + i] = 0; }
-    }
-    syncCities(body); return Math.max(0, amount) - remaining;
+    const taken = Math.min(Math.max(0, body.mass - floor), Math.max(0, amount));
+    body.mass -= taken; return taken;
+  }
+  // 工程进度与实际支付的质量同步，资源不足时保留已完成进度。
+  function fund(body, progress, cost) {
+    return spend(body, Math.max(0, progress) * cost) / cost;
+  }
+  function repair(body, unit, dt, now, buildCost, docked = false) {
+    if (body.civ.population < config.extinctionPopulation || unit.hp <= 0 || unit.hp >= unit.maxHp) return;
+    const cfg = SolarConfig.fleet.repair;
+    const elapsed = Math.max(0, Math.min(dt, now - unit.lastHit - cfg.delay));
+    const healing = Math.min(unit.maxHp - unit.hp, unit.maxHp * (docked ? cfg.dockedFraction : cfg.fraction) * elapsed);
+    const massPerHp = buildCost * cfg.fullCostRatio / unit.maxHp;
+    unit.hp = Math.min(unit.maxHp, unit.hp + spend(body, healing * massPerHp) / massPerHp);
   }
   function seedLife(body) {
     if (!eligible(body) || body.civ.population > 0 || body.civ.incubation < config.incubationSeconds) return;
@@ -94,6 +97,11 @@ globalThis.SolarCivilization = (() => {
     const demand = c.population / 1e9 * config.upkeepPerBillion * Math.min(3, (1 + pressure(body)) / 2);
     c.consumption = spend(body, demand * dt) / dt;
     if (c.population < config.extinctionPopulation) { extinguish(body); return oldTech !== 0; }
+    for (let i = 0; i < c.cities.length; i++) {
+      const city = c.cities[i];
+      if (city.built && now - c.lastHit >= SolarConfig.fleet.repair.delay)
+        repair(body, city, dt, now, SolarConfig.fleet.construction.cost.city[i]);
+    }
     c.pressure = pressure(body); research(body, dt);
     // 完全破碎的护盾由建造队列重建，残存护盾才进行恢复。
     if (c.shield > 0) {
@@ -120,5 +128,5 @@ globalThis.SolarCivilization = (() => {
     return { label: pressure(body) >= 3 ? "Research paused" : "Researching", value: c.research, total: next.research };
   }
   return { create, stats, sync, syncCities, pressure, buildSpeed, rings, collisionRadius, hasProducts,
-    extinguish, research, tick, suffer, eligible, spend, progress };
+    extinguish, research, tick, suffer, eligible, spend, fund, repair, progress };
 })();

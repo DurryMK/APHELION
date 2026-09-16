@@ -44,6 +44,11 @@
     </dl>
     <div class="progress-label"><span id="next-stage">Incubating life</span><span id="progress-text">0%</span></div>
     <div class="progress-track"><i id="progress"></i></div>
+    <details id="artifacts-panel">
+      <summary>Artificial structures</summary>
+      <div id="artifacts-list" role="list" aria-label="Artificial structures" tabindex="0"></div>
+      <p id="artifacts-empty">No artificial structures yet.</p>
+    </details>
   </section>
   <dialog id="pause-screen" aria-labelledby="pause-title">
     <h2 id="pause-title">Quick guide</h2>
@@ -70,6 +75,7 @@
       <p>Destroy all artificial structures before mining a planet's core. Mining sharply reduces its population.</p>
       <p>Population accelerates research and construction. Below 1 M, civilization and all artificial structures perish.</p>
       <p>Build order: shield, guns, carriers, cities. Core damage pauses all construction for 5 seconds.</p>
+      <p>Construction and repairs use core mass, except shields. Ships repair only while docked.</p>
       <p>Ships need ammunition and life support. Recall before accelerating; ships that cannot return are lost.</p>
       <p>Steady flight keeps up to one third of your ships on patrol. Ships turn gradually and return to resupply.</p>
     </section>
@@ -116,6 +122,7 @@
   <script src="spacing.js"></script>
   <script src="fleet.js"></script>
   <script src="regions.js"></script>
+  <script src="artifacts.js"></script>
   <script src="game.js"></script>
 </body>
 </html>
