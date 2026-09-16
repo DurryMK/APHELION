@@ -5,9 +5,9 @@ globalThis.SolarGravity = (() => {
   const mass = body => body.mass;
   const participates = body => body.alive && !body.entity;
   const range = body => SolarConfig.types[body.type].gravityRange * (body.isPlayer ? config.playerRangeScale : 1);
-  const captureRange = body => body.natural || body.type === 0 ? 0 : range(body) * SolarConfig.capture.rangeRatio;
-  const propulsionLimit = body => 200 + Math.max(0, Math.min(5, SolarConfig.types[body.type].level)) * 50;
-  const speedLimit = body => body.isPlayer ? propulsionLimit(body) * config.playerSpeedMultiplier : config.bodySpeedLimit;
+  const captureRange = body => body.natural || body.type === 0 ? 0 : range(body);
+  const propulsionLimit = body => Math.min(config.bodySpeedLimit, 200 + Math.max(0, Math.min(5, SolarConfig.types[body.type].level)) * 50);
+  const speedLimit = () => config.bodySpeedLimit;
 
   function kernel(a, b, distanceSquared) {
     const radius = Math.max(range(a), range(b));

@@ -5,16 +5,17 @@ globalThis.SolarConfig = {
     { name: "Dust", min: 0, radius: 2, color: "#a8b5c9", kind: "asteroid", level: -1, gravityRange: 40 },
     { name: "Core", min: 12, radius: 2.5, color: "#b29b89", kind: "rock", level: 0, gravityRange: 70 },
     { name: "Luna", min: 24, radius: 3, color: "#baaaa0", kind: "rock", level: 1, gravityRange: 90 },
-    { name: "Mars", min: 60, radius: 3.5, color: "#d58b70", kind: "rock", level: 2, gravityRange: 110 },
-    { name: "Terra", min: 150, radius: 4, color: "#62dcc9", kind: "ice", level: 3, gravityRange: 140 },
-    { name: "Gaia", min: 350, radius: 4.5, color: "#8f9dff", kind: "rock", level: 4, gravityRange: 170 },
-    { name: "Halo", min: 800, radius: 5, color: "#539dff", kind: "ice", level: 5, gravityRange: 210 },
-    { name: "Titan", min: 1600, radius: 6, color: "#e5b65f", kind: "gas", level: 6, gravityRange: 210 },
-    { name: "Sol", mass: 8000, radius: 6, color: "#ffda78", kind: "star", natural: true, gravityRange: 280, hazardRange: 24 },
-    { name: "Pulsar", mass: 14000, radius: 3, color: "#a28aff", kind: "neutron", natural: true, gravityRange: 330, hazardRange: 32 },
-    { name: "Void", mass: 24000, radius: 5, color: "#c49aff", kind: "black-hole", natural: true, gravityRange: 380, hazardRange: 40 }
+    { name: "Mars", min: 60, radius: 4, color: "#d58b70", kind: "rock", level: 2, gravityRange: 110 },
+    { name: "Terra", min: 150, radius: 5, color: "#62dcc9", kind: "ice", level: 3, gravityRange: 140 },
+    { name: "Gaia", min: 350, radius: 6, color: "#8f9dff", kind: "rock", level: 4, gravityRange: 170 },
+    { name: "Halo", min: 800, radius: 7, color: "#539dff", kind: "ice", level: 5, gravityRange: 210 },
+    { name: "Titan", min: 1600, radius: 7.5, color: "#e5b65f", kind: "gas", level: 6, gravityRange: 210 },
+    { name: "Sol", mass: 8000, radius: 13, color: "#ffda78", kind: "star", natural: true, gravityRange: 280, hazardRange: 64 },
+    { name: "Pulsar", mass: 14000, radius: 9, color: "#a28aff", kind: "neutron", natural: true, gravityRange: 330, hazardRange: 32 },
+    { name: "Void", mass: 24000, radius: 9, color: "#c49aff", kind: "black-hole", natural: true, gravityRange: 380, hazardRange: 40 }
   ],
   planetSizeSaturationMass: 3200,
+  maxBodyRadius: 8,
   regions: { size: 1600, radius: 560, beltChance: .32, nestChance: .18, systemChance: .16, decorationCount: 64 },
   populationTitles: [
     { population: 1e7, name: "Dawn" }, { population: 2e7, name: "Hearth" },
@@ -29,11 +30,11 @@ globalThis.SolarConfig = {
   physicsStep: 1 / 120,
   gravity: {
     constant: 60, softening: 6, fadeStart: .8, cellSize: 200,
-    playerRangeScale: .7, playerSpeedMultiplier: 3, bodySpeedLimit: 2400,
+    playerRangeScale: .7, bodySpeedLimit: 240,
     maxSubsteps: 8, travelPerStep: 2, velocityChangePerStep: 12
   },
   capture: {
-    rangeRatio: .7, minSpeedLimit: 60, maxSpeedLimit: 140, speedFactor: 1.2,
+    minSpeedLimit: 60, maxSpeedLimit: 140, speedFactor: 1.2,
     massRatio: 5, assistLimit: 65, orbitAngularSpeed: .12,
     minimumOrbitRadius: 18, orbitRadiusRatio: .75, maxTidalRatio: .7
   },
@@ -63,7 +64,7 @@ globalThis.SolarConfig = {
     gunLimit: 3, gunHp: 100, carrierHp: 180, threatMemory: 5,
     decisionInterval: .2, searchInterval: .8, recallSeconds: 10, activeCivilizations: 5,
     activationRadius: 1100, searchCell: 180,
-    steering: .9, acceleration: 24, carrierOrbitSpeed: .07,
+    steering: 1.8, acceleration: 48, carrierOrbitSpeed: .07,
     patrolRatio: 1 / 3, patrolRangeRatio: .35, patrolOrbitSpeed: .1, stableSeconds: 4, stableAcceleration: 4,
     grades: [
       { mothers: 1, perMother: 3, hp: 12, damage: 1, interval: .4, ammo: 20, range: 260, attackRange: 65, cargo: 4, mining: 1, speed: 65, supply: 3, production: 12, cost: 1, endurance: 45 },
@@ -91,7 +92,7 @@ globalThis.SolarConfig = {
     fightersPerNest: 8, resupplySeconds: 3,
     mothershipHp: 100, fighterHp: 12, fighterSpeed: 42, activityRadius: 420,
     range: 90, damage: 3, interval: 1.4, shots: 10, engagementRange: 420,
-    patrolRadius: 110, patrolOrbitSpeed: .12, acceleration: 16, steering: .8,
+    patrolRadius: 110, patrolOrbitSpeed: .12, acceleration: 32, steering: 1.6,
     mothershipRange: 150, mothershipDamage: 4, mothershipInterval: 2
   },
   saveKey: "aphelion-civilization-save-v4"

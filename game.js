@@ -7,7 +7,6 @@
   const CONFIG = SolarConfig, CIV = SolarCivilization, GRAVITY = SolarGravity;
   const TYPES = CONFIG.types;
   const STEP = CONFIG.physicsStep, WORLD_RADIUS = 1800;
-  const playerSpeedLimit = type => 200 + Math.max(0, Math.min(5, TYPES[type].level)) * 50;
   const CAPTURE = CONFIG.capture;
   const POPULATION = CONFIG.population;
   let universeSeed = 0;
@@ -73,7 +72,8 @@
     body.type = typeOf(body.mass);
     const base = TYPES[body.type];
     const upper = body.type < 7 ? TYPES[body.type + 1].min : CONFIG.planetSizeSaturationMass;
-    body.radius = base.radius + clamp((body.mass - base.min) / (upper - base.min), 0, 1) * 0.3;
+    const upperRadius = body.type < 7 ? TYPES[body.type + 1].radius : CONFIG.maxBodyRadius;
+    body.radius = base.radius + clamp((body.mass - base.min) / (upper - base.min), 0, 1) * (upperRadius - base.radius);
     CIV.sync(body);
   }
 
@@ -88,6 +88,7 @@
     const { vx, vy } = velocity;
     const body = { id: nextId++, x, y, px: x, py: y, vx, vy, ax: 0, ay: 0, mass, healthyMass: mass, integrity: 1, natural: naturalType !== null, type: naturalType, civ: CIV.create(), artifacts: [], kills: { planet: 0, mothership: 0 }, nextAttack: 0, nextAbsorb: 0, recallUntil: 0, hazardReady: 0, alive: true, trail: [], trailAt: 0, host: null, orbitRadius: 0, orbitDirection: 1, captureAfter: 0, cooldown: 0, phase: random(0, Math.PI * 2) };
     updateSize(body);
+    GRAVITY.limitVelocity(body);
     bodies.push(body);
     return body;
   }
@@ -147,6 +148,7 @@
         const planet = createBody(star.x + Math.cos(angle) * radius, star.y + Math.sin(angle) * radius, 30 + i * 45);
         const gravity = GRAVITY.accelerationFrom(planet, star), speed = Math.sqrt(Math.hypot(gravity.x, gravity.y) * radius);
         planet.vx = star.vx - Math.sin(angle) * speed; planet.vy = star.vy + Math.cos(angle) * speed;
+        GRAVITY.limitVelocity(planet);
       }
       seededSystems.add(region.key);
     }
@@ -545,7 +547,7 @@
   function nearestFleetTarget(ship, range) {
     let result = null, nearest = range, bestRank = Infinity;
     for (const body of [...bodies, ...fleets.units]) {
-      if (!body.alive || body.natural || body.mode === "dock") continue;
+      if (!body.alive || body.natural || body.mode === "dock" || !body.entity && body.type === 0) continue;
       if (ship.entity === "fighter") {
         const mother = nestRecords.get(ship.mother);
         if (Math.hypot(body.x - mother.x, body.y - mother.y) > CONFIG.nests.activityRadius * (1 + mother.grade * .12)) continue;
@@ -663,6 +665,7 @@
         target.x = source.x + Math.cos(angle) * (radius + 2);
         target.y = source.y + Math.sin(angle) * (radius + 2);
         target.vx = source.vx + Math.cos(angle) * 35; target.vy = source.vy + Math.sin(angle) * 35;
+        GRAVITY.limitVelocity(target);
         target.cooldown = time + .5;
       }
       return;
@@ -684,11 +687,14 @@
       a.vx -= impulse * nx / massA; a.vy -= impulse * ny / massA;
       b.vx += impulse * nx / massB; b.vy += impulse * ny / massB;
     }
+    GRAVITY.limitVelocity(a); GRAVITY.limitVelocity(b);
     a.cooldown = b.cooldown = time + .3;
     const loss = clamp(speed / 600, CONFIG.combat.collisionMinLoss, CONFIG.combat.collisionMaxLoss);
-    // 撞击损失的质量直接耗散，不生成实体天体。
-    damageUnit(a, massA * loss, b, "collision");
-    damageUnit(b, massB * loss, a, "collision");
+    // 基础绝对伤害由约化质量与碰撞前相对速度决定，再按质量比平方根分配。
+    const baseDamage = 2 * (massA / total) * massB * loss;
+    const massFactor = Math.sqrt(massB / massA);
+    damageUnit(a, baseDamage * massFactor, b, "collision");
+    damageUnit(b, baseDamage / massFactor, a, "collision");
     burst(a.x, a.y, "#f7cc9c", Math.min(25, Math.ceil(total)), 50);
     if (a === player || b === player) {
       shake = 4;
@@ -924,7 +930,8 @@
       lastHit: time - snapshot.civ.lastHit, coreHitUntil: time + snapshot.civ.coreHitUntil };
     player.kills = { planet: snapshot.kills.planet, mothership: snapshot.kills.mothership };
     player.recallUntil = time + snapshot.recallRemaining; nextPopulation = time + 2;
-    player.vx = snapshot.vx; player.vy = snapshot.vy; updateSize(player);
+    player.vx = snapshot.vx; player.vy = snapshot.vy;
+    GRAVITY.limitVelocity(player); updateSize(player);
     fleets.restore(player, snapshot.fleet, time);
   }
 
@@ -1277,6 +1284,23 @@
     ctx.restore();
   }
 
+  function drawFleetRanges() {
+    const artifacts = player.artifacts.filter(unit => unit.alive);
+    ctx.save(); ctx.lineWidth = .6;
+    const ring = (unit, radius, color, dash) => {
+      ctx.beginPath(); ctx.setLineDash(dash);
+      ctx.arc(screenX(unit.x), screenY(unit.y), radius * camera.zoom, 0, Math.PI * 2);
+      ctx.strokeStyle = color; ctx.stroke();
+    };
+    if (artifacts.some(unit => unit.entity === "carrier" || unit.entity === "drone")) {
+      const grade = CONFIG.fleet.grades[Math.min(3, Math.max(0, player.civ.tech - 3))];
+      ring(player, grade.range, "#82cfd32b", [5, 9]);
+    }
+    const attackRange = CIV.stats(player).range;
+    for (const gun of artifacts) if (gun.entity === "gun") ring(gun, attackRange, "#e5b65f26", [2, 6]);
+    ctx.restore();
+  }
+
   function draw() {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.fillStyle = "#050911"; ctx.fillRect(0, 0, width, height);
@@ -1298,11 +1322,7 @@
       ctx.save(); ctx.beginPath();
       ctx.arc(screenX(player.x), screenY(player.y), GRAVITY.range(player) * camera.zoom, 0, Math.PI * 2);
       ctx.setLineDash([3, 7]); ctx.strokeStyle = `${TYPES[player.type].color}30`; ctx.lineWidth = .6; ctx.stroke(); ctx.restore();
-      if (isPlanet(player)) {
-        ctx.save(); ctx.beginPath();
-        ctx.arc(screenX(player.x), screenY(player.y), GRAVITY.captureRange(player) * camera.zoom, 0, Math.PI * 2);
-        ctx.setLineDash([1, 4]); ctx.strokeStyle = `${TYPES[player.type].color}55`; ctx.lineWidth = .6; ctx.stroke(); ctx.restore();
-      }
+      drawFleetRanges();
       ctx.beginPath();
       for (const b of bodies) {
         if (!b.alive || b.host !== player.id) continue;
@@ -1399,7 +1419,7 @@
     const satellites = bodies.filter(b => b.alive && b.host === player.id);
     SolarLanguage.text(ui.satellites, `${satellites.length}/${satelliteLimit(player.type)}`);
     if (!satellites.some(b => b.id === selectedSatelliteId)) { selectedSatelliteId = null; satelliteClickAt = -Infinity; }
-    SolarLanguage.attribute(ui.speed, "title", `Thrust cap ${playerSpeedLimit(player.type)} · Speed cap ${GRAVITY.speedLimit(player)}`);
+    SolarLanguage.attribute(ui.speed, "title", `Thrust cap ${GRAVITY.propulsionLimit(player)} · Speed cap ${GRAVITY.speedLimit(player)}`);
     SolarLanguage.text(ui["next-stage"], growth.label);
     SolarLanguage.text(ui["progress-text"], `${Math.floor(percent)}%`); ui.progress.style.width = `${percent}%`;
     ui.progress.style.background = type.color;

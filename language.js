@@ -5,6 +5,7 @@ globalThis.SolarLanguage = (() => {
   "Space game: WASD thrust, K select satellite, L absorb, T jump, Space pause": "太空游戏：WASD 推进，K 选择卫星，L 吸收，T 跃迁，空格暂停",
   "A thought from the cosmos": "宇宙随想",
   "Body status": "天体状态",
+  "Dashed rings: gravity and capture, cyan fleet detection, gold orbital gun range.": "虚线圈：引力与捕获范围；青色为舰队探测范围，金色为轨道炮射程。",
   "Artificial structures": "人造物",
   "No artificial structures yet.": "暂无人造物。",
   "Orbital gun": "轨道炮",

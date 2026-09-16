@@ -48,6 +48,8 @@ globalThis.SolarFleet = {
       return !CIV.hasProducts(target);
     }
     function enemy(owner, target) {
+      // 陨石仅作为采集资源，飞船不对其开火。
+      if (!target.entity && target.type === 0) return false;
       return target.alive && !own(owner, target) &&
         (target.entity ? target.mode !== "dock" : !target.natural && target.type > 0 && CIV.hasProducts(target));
     }
