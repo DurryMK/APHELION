@@ -58,13 +58,13 @@ globalThis.SolarConfig = {
     mothershipResearchReward: 8
   },
   fleet: {
-    construction: { shield: 60, gun: 25, carrier: 40, city: 90, devour: 70, maxSpeed: 4,
-      cost: { gun: 8, carrier: 20, city: [40, 80], devour: 45 }, cityHp: [200, 350] },
+    construction: { shield: 60, gun: 25, carrier: 40, city: 90, devour: 70, harbor: 100, maxSpeed: 4,
+      cost: { gun: 8, carrier: 20, city: [40, 80], devour: 45, harbor: 70 }, cityHp: [200, 350] },
     repair: { delay: 5, fraction: .03, dockedFraction: .15, fullCostRatio: .6 },
     gunLimit: 3, gunHp: 100, carrierHp: 180, threatMemory: 5,
     decisionInterval: .2, searchInterval: .8, recallSeconds: 10, activeCivilizations: 5,
     activationRadius: 1100, searchCell: 180,
-    steering: 1.8, acceleration: 48, gunOrbitSpeed: .08, carrierOrbitSpeed: .055, devourOrbitSpeed: .11,
+    steering: 1.8, acceleration: 48, gunOrbitSpeed: .08, carrierOrbitSpeed: .055,
     patrolRatio: 1 / 3, patrolRangeRatio: .35, patrolOrbitSpeed: .1, stableSeconds: 4, stableAcceleration: 4,
     grades: [
       { mothers: 1, perMother: 3, hp: 12, damage: 1, interval: .4, ammo: 20, range: 260, attackRange: 65, speed: 65, supply: 3, production: 12, cost: 1, endurance: 45 },
@@ -77,16 +77,21 @@ globalThis.SolarConfig = {
     gradeFor(tech) { return this.grades[Math.min(this.grades.length - 1, Math.max(0, tech - 3))]; },
     // 吞星船：专职吞噬，无攻击；数量与血量随科技提升，2/5/7 级张开形态不同。
     devour: {
-      tech: 2,
       limit: [0, 0, 1, 1, 1, 2, 2, 2],
       hp: [0, 0, 420, 560, 720, 900, 1100, 1350],
-      radius: 2.5, speed: 80, towSpeed: 55, towGap: 14, towOrbit: .06, orbitOffset: 16,
+      radius: 1.6, speed: 50, towSpeed: 55, towGap: 14, towOrbit: .06,
       rate: 4, ratePerTech: 1.5, overrunDamage: 8, wrapDuration: 3
+    },
+    // 吞星船港口：与母舰同轨、体积更大、血量高且可被攻击，无攻击能力，用于停泊两艘吞星船。
+    harbor: {
+      tech: 2, limit: 1, capacity: 2, radius: 7.5,
+      hp: [0, 0, 1200, 1600, 2000, 2500, 3000, 3600]
     }
   },
   population: {
     initial: 95, target: 130, nearby: 12, batch: 6,
     asteroidChance: .80, naturalChance: .004, naturalLimit: 3,
+    naturalSpacing: 1100, naturalGuardSafeRadius: 900,
     largePlanetLimit: 4, advancedCivilizationLimit: 2,
     planetWeights: [45, 28, 16, 7, 3, 1],
     technologyWeights: [40, 30, 18, 8, 3, .8, .18, .02]
@@ -95,9 +100,9 @@ globalThis.SolarConfig = {
   hazards: { interval: .5, damageFraction: .025, minimumDamage: 2, contactFraction: .25, contactMinimum: 20 },
   nests: {
     grades: [
-      { chance: .76, color: "#ff6575", hull: "#713548", multiplier: 1, roamSpeed: 5, launchSeconds: 4, massReward: 40 },
-      { chance: .20, color: "#eef5ff", hull: "#9aabbd", multiplier: 1.65, roamSpeed: 6, launchSeconds: 3, massReward: 120 },
-      { chance: .04, color: "#c7a6ff", hull: "#090711", multiplier: 2.6, roamSpeed: 7, launchSeconds: 2, massReward: 320 }
+      { chance: .76, color: "#ff6575", hull: "#713548", multiplier: 1, roamSpeed: 5, launchSeconds: 4, fightersPerNest: 8, massReward: 40 },
+      { chance: .20, color: "#eef5ff", hull: "#9aabbd", multiplier: 1.65, roamSpeed: 6, launchSeconds: 3, fightersPerNest: 8, massReward: 120 },
+      { chance: .04, color: "#c7a6ff", hull: "#090711", multiplier: 2.6, roamSpeed: 7, launchSeconds: 2, fightersPerNest: 10, massReward: 320 }
     ],
     activeLimit: 3, safeRadius: 800,
     fightersPerNest: 8, resupplySeconds: 3,

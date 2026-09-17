@@ -23,9 +23,9 @@ globalThis.SolarFleet = {
     const atTech = table => owner => table[Math.min(table.length - 1, Math.max(0, owner.civ.tech))];
     const devourLimit = atTech(devour.limit), devourHp = atTech(devour.hp);
     const devourRate = owner => devour.rate + devour.ratePerTech * owner.civ.tech;
-    const devourStyle = owner => owner.civ.tech >= 7 ? 2 : owner.civ.tech >= 5 ? 1 : 0;
-    // 三类设施/单位各用不同角速度，形成错落的公转。
-    const orbitSpeed = entity => entity === "gun" ? cfg.gunOrbitSpeed : entity === "carrier" ? cfg.carrierOrbitSpeed : cfg.devourOrbitSpeed;
+    const harbor = cfg.harbor, harborHp = atTech(harbor.hp);
+    // 炮与港口共轨（同角速度，港口错开 60°）；母舰用另一角速度。
+    const orbitSpeed = entity => entity === "carrier" ? cfg.carrierOrbitSpeed : cfg.gunOrbitSpeed;
     function nearby(owner, radius) {
       const result = [];
       for (let x = Math.floor((owner.x - radius) / cfg.searchCell); x <= Math.floor((owner.x + radius) / cfg.searchCell); x++) {
@@ -61,6 +61,11 @@ globalThis.SolarFleet = {
       return target.alive && !own(owner, target) &&
         (target.entity ? target.mode !== "dock" : !target.natural && target.type > 0 && CIV.hasProducts(target));
     }
+    // 范围内存在敌对单位时，吞星船不出动。
+    function hostileNearby(owner, radius) {
+      for (const target of nearby(owner, radius)) if (enemy(owner, target)) return true;
+      return false;
+    }
     // 求飞船追上匀速移动目标所需的时间，用于出航预算与提前返航。
     function intercept(from, target, speed) {
       const dx = target.x - from.x, dy = target.y - from.y;
@@ -74,24 +79,26 @@ globalThis.SolarFleet = {
       return roots.length ? Math.min(...roots) : Infinity;
     }
     function launchRate(owner, spec) {
+      // 以主星实际速度与舰载机速度比较：达到舰速即无法伴随作战。
       const ratio = Math.hypot(owner.vx, owner.vy) / spec.speed;
       if (ratio <= .25) return 1;
-      if (ratio < .6) return 1 - (ratio - .25) / .35 * .6;
-      return Math.max(0, (.85 - ratio) / .25 * .4);
+      if (ratio >= 1) return 0;
+      return Math.max(0, 1 - (ratio - .25) / .75);
     }
     function facilityAngle(owner, slot, now, entity) {
-      const count = entity === "gun" ? cfg.gunLimit : grade(owner).mothers;
-      // 母舰位于相邻轨道炮之间；炮与母舰使用不同角速度，轨道错开。
-      const offset = entity === "carrier" ? Math.PI / cfg.gunLimit : 0;
+      const count = entity === "gun" ? cfg.gunLimit : entity === "harbor" ? harbor.limit : grade(owner).mothers;
+      // 母舰位于相邻轨道炮之间；港口与炮共轨，错开半个炮间距避免重叠。
+      const offset = entity === "carrier" || entity === "harbor" ? Math.PI / cfg.gunLimit : 0;
       return now * orbitSpeed(entity) + owner.phase + offset + slot * Math.PI * 2 / count;
     }
     function makeFacility(owner, slot, now, entity) {
       const orbit = CIV.rings(owner)[entity];
       const angle = facilityAngle(owner, slot, now, entity);
       const x = Math.cos(angle) * orbit, y = Math.sin(angle) * orbit;
-      const hp = (entity === "gun" ? cfg.gunHp : cfg.carrierHp) * (1 + owner.civ.tech * .15);
+      const hp = entity === "harbor" ? harborHp(owner) : (entity === "gun" ? cfg.gunHp : cfg.carrierHp) * (1 + owner.civ.tech * .15);
+      const radius = entity === "harbor" ? harbor.radius : entity === "gun" ? 3.5 : 6;
       const unit = { id: context.id(), entity, ownerId: owner.id, owner, slot,
-        x: owner.x + x, y: owner.y + y, vx: owner.vx, vy: owner.vy, radius: entity === "gun" ? 3.5 : 6, alive: true,
+        x: owner.x + x, y: owner.y + y, vx: owner.vx, vy: owner.vy, radius, alive: true,
         hp, maxHp: hp, aim: angle, lastHit: -Infinity, buildProgress: 0, nextLaunch: now, nextAttack: now,
         orbitMotion: { x, y, vx: -y * orbitSpeed(entity), vy: x * orbitSpeed(entity) } };
       owner.artifacts.push(unit); return unit;
@@ -99,9 +106,9 @@ globalThis.SolarFleet = {
     function makeDevourer(owner, now, slot) {
       const hp = devourHp(owner);
       const unit = { id: context.id(), entity: "devourer", ownerId: owner.id, owner, slot,
-        x: owner.x, y: owner.y, vx: owner.vx, vy: owner.vy, radius: devour.radius,
+        x: owner.x, y: owner.y, vx: owner.vx, vy: owner.vy, radius: devour.radius, mode: null,
         hp, maxHp: hp, lastHit: -Infinity, alive: true,
-        state: "return", target: null, towing: null, orbitAngle: owner.phase, towRadius: 0, towAngle: 0, nextSearch: now };
+        state: "return", target: null, towing: null, orbitAngle: owner.phase, towRadius: 0, towAngle: 0, nextSearch: now, bestDistance: Infinity, progressAt: now };
       owner.artifacts.push(unit); return unit;
     }
     function releaseDevourer(unit) {
@@ -119,13 +126,13 @@ globalThis.SolarFleet = {
       const active = new Set(chosen.map(b => b.id));
       const live = new Set(bodies.filter(b => b.alive).map(b => b.id));
       for (const owner of chosen) if (!groups.has(owner.id)) groups.set(owner.id, {
-        owner, mothers: [], guns: [], planes: [], devourers: [], enabled: true, stableSince: now,
+        owner, mothers: [], guns: [], harbors: [], planes: [], devourers: [], enabled: true, stableSince: now,
         motionAt: now, lastVx: owner.vx, lastVy: owner.vy
       });
       for (const [id, group] of groups) {
         const owner = group.owner;
         if (!live.has(id) || owner.civ.tech < 1) {
-          for (const unit of [...group.planes, ...group.mothers, ...group.guns, ...group.devourers]) {
+          for (const unit of [...group.planes, ...group.mothers, ...group.guns, ...group.harbors, ...group.devourers]) {
             if (unit.entity === "devourer") releaseDevourer(unit);
             unit.alive = false;
           }
@@ -135,10 +142,17 @@ globalThis.SolarFleet = {
         const spec = grade(owner);
         group.mothers = group.mothers.filter(m => m.alive);
         group.guns = group.guns.filter(g => g.alive);
+        group.harbors = group.harbors.filter(h => h.alive);
+        // 港口被摧毁后，停泊其中的吞星船同步消亡。
+        if (!group.harbors.some(h => h.alive)) for (const unit of group.devourers) { releaseDevourer(unit); unit.alive = false; }
         for (const unit of group.devourers) if (!unit.alive) releaseDevourer(unit);
         group.devourers = group.devourers.filter(u => u.alive);
         owner.artifacts = owner.artifacts.filter(u => u.alive);
         group.planes = group.planes.filter(p => p.alive);
+        const hpH = harborHp(owner);
+        for (const unit of group.harbors) {
+          if (unit.maxHp !== hpH) { unit.hp = Math.min(hpH, unit.hp + Math.max(0, hpH - unit.maxHp)); unit.maxHp = hpH; }
+        }
         for (const plane of group.planes) {
           plane.maxHp = spec.hp; plane.hp = Math.min(spec.hp, plane.hp);
           plane.radius = owner.civ.tech >= 6 ? 3 : 2.5;
@@ -153,7 +167,7 @@ globalThis.SolarFleet = {
         // 已靠港的远处舰队保留状态，停止生产、决策和移动。
         group.sleeping = !group.enabled && group.planes.every(p => p.mode === "dock") && group.devourers.every(u => u.state === "orbit");
       }
-      units = [...groups.values()].filter(g => !g.sleeping).flatMap(g => [...g.mothers, ...g.guns, ...g.devourers, ...g.planes]).filter(u => u.alive);
+      units = [...groups.values()].filter(g => !g.sleeping).flatMap(g => [...g.mothers, ...g.guns, ...g.harbors, ...g.devourers, ...g.planes]).filter(u => u.alive);
     }
     function recall(owner, now) {
       owner.recallUntil = now + cfg.recallSeconds;
@@ -197,7 +211,7 @@ globalThis.SolarFleet = {
       if (c.tech >= 1 && c.shield <= 0) kind = "shield";
       else if (c.tech >= 2 && group.guns.filter(g => g.alive).length < cfg.gunLimit) kind = "gun";
       else if (c.tech >= 3 && group.mothers.filter(m => m.alive).length < grade(owner).mothers) kind = "carrier";
-      else if (c.tech >= devour.tech && group.devourers.filter(u => u.alive).length < devourLimit(owner)) kind = "devour";
+      else if (c.tech >= harbor.tech && group.harbors.filter(h => h.alive).length < harbor.limit) kind = "harbor";
       else if (c.tech >= 5 && !c.cities[0].built) kind = "city0";
       else if (c.tech >= 6 && !c.cities[1].built) kind = "city1";
       if (!kind) return;
@@ -213,11 +227,7 @@ globalThis.SolarFleet = {
       if (project[kind] < 1 - 1e-9) return;
       project[kind] = 0;
       if (kind === "shield") { c.shield = CIV.stats(owner).shield; return; }
-      if (kind === "devour") {
-        let slot = 0; while (group.devourers.some(u => u.alive && u.slot === slot)) slot++;
-        const unit = makeDevourer(owner, now, slot); group.devourers.push(unit); units.push(unit); return;
-      }
-      const list = kind === "gun" ? group.guns : group.mothers;
+      const list = kind === "gun" ? group.guns : kind === "harbor" ? group.harbors : group.mothers;
       let slot = 0; while (list.some(u => u.alive && u.slot === slot)) slot++;
       const unit = makeFacility(owner, slot, now, kind); list.push(unit); units.push(unit);
     }
@@ -226,21 +236,21 @@ globalThis.SolarFleet = {
       for (const group of groups.values()) {
         if (group.sleeping) continue;
         if (!group.owner.alive || group.owner.civ.tech === 0) {
-          for (const unit of [...group.mothers, ...group.guns, ...group.planes, ...group.devourers]) {
+          for (const unit of [...group.mothers, ...group.guns, ...group.harbors, ...group.planes, ...group.devourers]) {
             if (unit.entity === "devourer") releaseDevourer(unit);
             unit.alive = false;
           }
           continue;
         }
         const owner = group.owner, spec = grade(owner), rate = launchRate(owner, spec);
-        if (group.enabled) for (const facility of [...group.mothers, ...group.guns]) {
+        if (group.enabled) for (const facility of [...group.mothers, ...group.guns, ...group.harbors]) {
           if (facility.alive) CIV.repair(owner, facility, cfg.decisionInterval, now, cfg.construction.cost[facility.entity]);
         }
         buildStructures(group, now);
         const elapsed = now - group.motionAt;
         if (elapsed > 0 && Math.hypot(owner.vx - group.lastVx, owner.vy - group.lastVy) / elapsed > cfg.stableAcceleration) group.stableSince = now;
         group.motionAt = now; group.lastVx = owner.vx; group.lastVy = owner.vy;
-        const stable = now - group.stableSince >= cfg.stableSeconds && Math.hypot(owner.vx, owner.vy) < spec.speed * .7;
+        const stable = now - group.stableSince >= cfg.stableSeconds && Math.hypot(owner.vx, owner.vy) < spec.speed;
         const patrolLimit = stable && group.enabled && now >= owner.recallUntil ? Math.floor(group.planes.filter(p => p.alive).length * cfg.patrolRatio) : 0;
         const patrols = group.planes.filter(p => p.alive && p.patrol && p.mode !== "dock");
         for (const plane of patrols.slice(patrolLimit)) { plane.mode = "return"; plane.target = null; }
@@ -258,6 +268,20 @@ globalThis.SolarFleet = {
             shots: spec.ammo, departed: now, expires: now, nextAttack: now,
             nextSearch: now + (mother.slot * .13), target: null, retiring: false, patrol: false };
           group.planes.push(plane); units.push(plane); owner.artifacts.push(plane); mother.buildProgress = 0;
+        }
+        // 港口生产吞星船，机制同母舰生产舰载机；受科技上限与港口容量约束。
+        for (const harborUnit of group.harbors) {
+          if (!harborUnit.alive || !group.enabled || now < owner.civ.coreHitUntil) continue;
+          if (group.devourers.filter(u => u.alive).length >= Math.min(devourLimit(owner), harbor.capacity)) continue;
+          harborUnit.buildProgress += CIV.fund(owner, Math.min(1 - harborUnit.buildProgress,
+            cfg.decisionInterval * CIV.buildSpeed(owner) / cfg.construction.devour), cfg.construction.cost.devour);
+          if (harborUnit.buildProgress < 1 - 1e-9) continue;
+          let slot = 0; while (group.devourers.some(u => u.alive && u.slot === slot)) slot++;
+          const unit = makeDevourer(owner, now, slot);
+          const dest = berthDesired(owner, harborUnit, unit);
+          unit.x = dest.x; unit.y = dest.y; unit.vx = dest.vx; unit.vy = dest.vy;
+          unit.state = "orbit"; unit.mode = "dock";
+          group.devourers.push(unit); units.push(unit); harborUnit.buildProgress = 0;
         }
         for (const plane of group.planes) {
           if (!plane.alive) continue;
@@ -284,7 +308,7 @@ globalThis.SolarFleet = {
             if (now >= plane.expires) { context.destroy(plane, null, "endurance"); continue; }
             const returnTime = intercept(plane, mother, spec.speed);
             if (!group.enabled || plane.retiring || now < owner.recallUntil || plane.shots <= 0 || plane.hp < spec.hp * .3 ||
-              Math.hypot(owner.vx, owner.vy) >= spec.speed * .9 || plane.expires - now < returnTime + Math.max(8, spec.endurance * .2) ||
+              Math.hypot(owner.vx, owner.vy) >= spec.speed || plane.expires - now < returnTime + Math.max(8, spec.endurance * .2) ||
               distance(plane, owner) > spec.range) {
               plane.mode = "return"; plane.target = null;
             }
@@ -307,26 +331,36 @@ globalThis.SolarFleet = {
           if (!unit.alive) continue;
           const hp = devourHp(owner);
           if (unit.maxHp !== hp) { unit.hp = Math.min(hp, unit.hp + Math.max(0, hp - unit.maxHp)); unit.maxHp = hp; }
-          CIV.repair(owner, unit, cfg.decisionInterval, now, cfg.construction.cost.devour);
+          // 仅在港口停泊时维修，机制同舰载机靠港维修。
+          if (group.enabled && unit.mode === "dock") CIV.repair(owner, unit, cfg.decisionInterval, now, cfg.construction.cost.devour, true);
           if (!group.enabled) { if (unit.state !== "orbit") releaseDevourer(unit); unit.state = "orbit"; continue; }
           if (unit.state === "wrapping" || unit.state === "anchor") {
             if (!unit.target?.alive || own(owner, unit.target) || CIV.hasProducts(unit.target) || distance(unit, owner) > spec.range) { releaseDevourer(unit); unit.state = "return"; }
             continue;
           }
           if (unit.state === "travel") {
-            if (!unit.target || !devourable(owner, unit.target) || distance(unit, owner) > spec.range) { releaseDevourer(unit); unit.target = null; unit.state = "return"; }
+            // 目标脱离探测范围（或自身超出牵引范围）即放弃返航。
+            if (!unit.target || !devourable(owner, unit.target) ||
+                distance(owner, unit.target) > spec.range || distance(unit, owner) > spec.range) {
+              releaseDevourer(unit); unit.target = null; unit.state = "return";
+            }
             continue;
           }
           // 沿用舰载机的出航速度门槛，按吞星船自身航速判断。
           if (unit.state === "return" || launchRate(owner, devour) <= 0 || now < unit.nextSearch) continue;
           unit.nextSearch = now + cfg.searchInterval;
-          let best = null, bestDistance = spec.range;
+          if (hostileNearby(owner, spec.range)) continue;
+          let best = null, bestMass = -Infinity, bestDistance = Infinity;
           for (const candidate of nearby(owner, spec.range)) {
             if (!devourable(owner, candidate) || candidate.devourerClaim) continue;
             const d2 = distance(owner, candidate);
-            if (d2 < bestDistance) { bestDistance = d2; best = candidate; }
+            if (d2 > spec.range) continue;
+            // 优先大质量天体，质量相同时取更近的。
+            if (candidate.mass > bestMass || candidate.mass === bestMass && d2 < bestDistance) {
+              bestMass = candidate.mass; bestDistance = d2; best = candidate;
+            }
           }
-          if (best) { unit.target = best; best.devourerClaim = unit.id; unit.state = "travel"; }
+          if (best) { unit.target = best; best.devourerClaim = unit.id; unit.state = "travel"; unit.mode = null; unit.bestDistance = distance(unit, best); unit.progressAt = now; }
         }
       }
       for (const group of groups.values()) if (!group.sleeping && group.owner.alive) context.resize(group.owner);
@@ -336,14 +370,14 @@ globalThis.SolarFleet = {
       for (const group of groups.values()) {
         if (group.sleeping) continue;
         if (!group.owner.alive || group.owner.civ.tech === 0) {
-          for (const unit of [...group.mothers, ...group.guns, ...group.planes, ...group.devourers]) {
+          for (const unit of [...group.mothers, ...group.guns, ...group.harbors, ...group.planes, ...group.devourers]) {
             if (unit.entity === "devourer") releaseDevourer(unit);
             unit.alive = false;
           }
           continue;
         }
         const owner = group.owner, spec = grade(owner);
-        for (const facility of [...group.mothers, ...group.guns]) {
+        for (const facility of [...group.mothers, ...group.guns, ...group.harbors]) {
           if (!facility.alive) continue;
           const orbit = CIV.rings(owner)[facility.entity];
           const angle = facilityAngle(owner, facility.slot, now, facility.entity);
@@ -382,32 +416,37 @@ globalThis.SolarFleet = {
         moveDevourers(group, dt, now);
       }
     }
-    // 吞星船在轨道上的目标点；返航与公转共用，保证状态切换连续、不瞬移。
-    function orbitDesired(owner, unit, now) {
-      const count = Math.max(1, devourLimit(owner));
-      const orbit = CIV.rings(owner).outer + devour.orbitOffset;
-      const angle = now * cfg.devourOrbitSpeed + owner.phase + (unit.slot + 1) * Math.PI * 2 / count;
-      return { x: owner.x + Math.cos(angle) * orbit, y: owner.y + Math.sin(angle) * orbit,
-        vx: owner.vx - Math.sin(angle) * orbit * cfg.devourOrbitSpeed,
-        vy: owner.vy + Math.cos(angle) * orbit * cfg.devourOrbitSpeed };
+    // 港口泊位：两艘吞星船并排停在港口内（沿径向一内一外）。
+    function berthDesired(owner, harborUnit, unit) {
+      const dx = harborUnit.x - owner.x, dy = harborUnit.y - owner.y, len = Math.hypot(dx, dy) || 1;
+      const side = (unit.slot % 2 === 0 ? -1 : 1) * harborUnit.radius * .5;
+      return { x: harborUnit.x + dx / len * side, y: harborUnit.y + dy / len * side,
+        vx: harborUnit.vx, vy: harborUnit.vy };
     }
     function moveDevourers(group, dt, now) {
       const owner = group.owner, spec = grade(owner);
+      // 吞星船没有独立轨道，全部停泊/往返于港口；无港口时由 sync 同步消亡。
+      const berth = group.harbors.find(h => h.alive) || null;
+      if (!berth) return;
       for (const unit of group.devourers) {
         if (!unit.alive) continue;
         if (unit.state === "orbit") {
-          const dest = orbitDesired(owner, unit, now);
+          const dest = berthDesired(owner, berth, unit);
           unit.x = dest.x; unit.y = dest.y; unit.vx = dest.vx; unit.vy = dest.vy;
+          // 停泊在港口内时隐藏于港口保护之下（dock 状态不可被选中/碰撞）。
+          unit.mode = "dock";
           continue;
         }
         if (unit.state === "return") {
-          const dest = orbitDesired(owner, unit, now);
+          const dest = berthDesired(owner, berth, unit);
           SolarFleet.steer(unit, dest, devour.speed, cfg.acceleration, cfg.steering, 0, dt);
           unit.x += unit.vx * dt; unit.y += unit.vy * dt;
           if (Math.hypot(unit.x - dest.x, unit.y - dest.y) < 8) unit.state = "orbit";
           if (distance(unit, owner) > spec.range) context.damage(unit, devour.overrunDamage * dt, null, "overrun");
           continue;
         }
+        // 出港执行任务，恢复可被攻击。
+        unit.mode = null;
         if (unit.state === "wrapping" || unit.state === "anchor") {
           const t = unit.target;
           if (!t?.alive) { releaseDevourer(unit); unit.state = "return"; continue; }
@@ -433,6 +472,10 @@ globalThis.SolarFleet = {
         const t = unit.target;
         if (!t?.alive) { releaseDevourer(unit); unit.target = null; unit.state = "return"; continue; }
         const stop = SolarSpacing.radius(t) + unit.radius + 3;
+        // 追上目标过程中若长时间没有更接近（目标更快/绕圈），超时放弃并返航，避免永久卡在前往状态。
+        const reach = distance(unit, t);
+        if (reach < unit.bestDistance - .5) { unit.bestDistance = reach; unit.progressAt = now; }
+        else if (now - unit.progressAt > 8) { releaseDevourer(unit); unit.target = null; unit.state = "return"; continue; }
         SolarFleet.steer(unit, t, devour.speed, cfg.acceleration, cfg.steering, stop, dt);
         unit.x += unit.vx * dt; unit.y += unit.vy * dt;
         if (distance(unit, t) <= stop + 3) {
@@ -456,17 +499,11 @@ globalThis.SolarFleet = {
     }
     function snapshot(owner, now) {
       const group = groups.get(owner.id);
-      if (!group || owner.civ.population === 0) return { facilities: [], planes: [], devourers: 0 };
+      // 只记录"拥有什么"：设施类型/槽位与血量、舰载机总数、吞星船数；位置与状态在载入时重建。
+      if (!group || owner.civ.population === 0) return { facilities: [], planes: 0, devourers: 0 };
       return {
-        facilities: [...group.mothers, ...group.guns].filter(u => u.alive).map(u => ({ entity: u.entity, slot: u.slot,
-          hp: u.hp, maxHp: u.maxHp, hitAgo: Math.min(10, now - u.lastHit), buildProgress: u.buildProgress, orbitMotion: { ...u.orbitMotion },
-          launchRemaining: Math.max(0, u.nextLaunch - now), attackRemaining: Math.max(0, u.nextAttack - now) })),
-        planes: group.planes.filter(p => p.alive && p.mother.alive).map(p => ({ motherSlot: p.mother.slot,
-          x: p.x - owner.x, y: p.y - owner.y, vx: p.vx, vy: p.vy, hp: p.hp, hitAgo: Math.min(10, now - p.lastHit), shots: p.shots,
-          docked: p.mode === "dock", readyRemaining: Math.max(0, p.readyAt - now),
-          flightAge: Math.max(0, now - p.departed), enduranceRemaining: Math.max(0, p.expires - now),
-          attackRemaining: Math.max(0, p.nextAttack - now) })),
-        // 只记录拥有的吞星船数量，不保存捕获目标与个体状态。
+        facilities: [...group.mothers, ...group.guns, ...group.harbors].filter(u => u.alive).map(u => ({ entity: u.entity, slot: u.slot, hp: u.hp })),
+        planes: group.planes.filter(p => p.alive).length,
         devourers: group.devourers.filter(u => u.alive).length
       };
     }
@@ -475,27 +512,38 @@ globalThis.SolarFleet = {
       const group = groups.get(owner.id);
       if (!group) return;
       const spec = grade(owner);
+      // 设施按当前科技/相位重新生成到各自轨道，仅沿用存档血量。
       for (const item of saved.facilities) {
         const unit = makeFacility(owner, item.slot, now, item.entity);
-        unit.hp = item.hp; unit.maxHp = item.maxHp; unit.lastHit = now - item.hitAgo; unit.buildProgress = item.buildProgress;
-        unit.orbitMotion = { ...item.orbitMotion }; unit.x = owner.x + item.orbitMotion.x; unit.y = owner.y + item.orbitMotion.y;
-        unit.nextLaunch = now + item.launchRemaining; unit.nextAttack = now + item.attackRemaining;
-        (item.entity === "gun" ? group.guns : group.mothers).push(unit); units.push(unit);
+        if (Number.isFinite(item.hp)) unit.hp = Math.min(unit.maxHp, Math.max(.01, item.hp));
+        (item.entity === "gun" ? group.guns : item.entity === "harbor" ? group.harbors : group.mothers).push(unit); units.push(unit);
       }
-      for (const item of saved.planes) {
-        const mother = group.mothers.find(m => m.slot === item.motherSlot);
-        const plane = { id: context.id(), entity: "drone", ownerId: owner.id, owner, mother,
-          x: owner.x + item.x, y: owner.y + item.y, vx: item.vx, vy: item.vy, radius: owner.civ.tech >= 6 ? 3 : 2.5,
-          hp: item.hp, maxHp: spec.hp, lastHit: now - item.hitAgo, alive: true, mode: item.docked ? "dock" : "return",
-          readyAt: now + item.readyRemaining, shots: item.shots,
-          departed: now - item.flightAge, expires: now + item.enduranceRemaining, nextAttack: now + item.attackRemaining,
-          nextSearch: now, target: null, retiring: false, patrol: false };
-        group.planes.push(plane); owner.artifacts.push(plane); units.push(plane);
+      // 舰载机全部重新靠港，按载机量分配到各母舰。
+      let remaining = Math.max(0, Math.min(saved.planes | 0, group.mothers.length * spec.perMother));
+      for (const mother of group.mothers) {
+        const count = Math.min(spec.perMother, remaining);
+        for (let i = 0; i < count; i++) {
+          const plane = { id: context.id(), entity: "drone", ownerId: owner.id, owner, mother,
+            x: mother.x, y: mother.y, vx: mother.vx, vy: mother.vy, radius: owner.civ.tech >= 6 ? 3 : 2.5,
+            hp: spec.hp, maxHp: spec.hp, lastHit: -Infinity, alive: true, mode: "dock", readyAt: now + spec.supply,
+            shots: spec.ammo, departed: now, expires: now, nextAttack: now,
+            nextSearch: now, target: null, retiring: false, patrol: false };
+          group.planes.push(plane); owner.artifacts.push(plane); units.push(plane);
+        }
+        remaining -= count;
       }
+      // 吞星船直接停入港口泊位（无港口时由 sync 同步消亡）。
+      const harborUnit = group.harbors.find(h => h.alive) || null;
       const count = Math.min(saved.devourers | 0, devourLimit(owner));
       for (let i = 0; i < count; i++) {
         let slot = 0; while (group.devourers.some(u => u.alive && u.slot === slot)) slot++;
-        const unit = makeDevourer(owner, now, slot); group.devourers.push(unit); units.push(unit);
+        const unit = makeDevourer(owner, now, slot);
+        if (harborUnit) {
+          const dest = berthDesired(owner, harborUnit, unit);
+          unit.x = dest.x; unit.y = dest.y; unit.vx = dest.vx; unit.vy = dest.vy;
+          unit.state = "orbit"; unit.mode = "dock";
+        }
+        group.devourers.push(unit); units.push(unit);
       }
     }
     function summary(owner, now) {

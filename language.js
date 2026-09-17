@@ -10,6 +10,7 @@ globalThis.SolarLanguage = (() => {
   "No artificial structures yet.": "暂无人造物。",
   "Orbital gun": "轨道炮",
   "Carrier": "母舰",
+  "Devourer harbor": "吞星船港口",
   "Space city": "太空城",
   "Ship": "飞船",
   "Hull": "血量",

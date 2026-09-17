@@ -7,10 +7,11 @@ globalThis.SolarSpacing = {
   },
   // 接触伤害由天体碰撞处理；空间约束仅分离实体，不施加引力。
   resolve(all) {
-    const units = all.filter(u => u.alive && u.mode !== "dock" && u.state !== "anchor");
+    // 吞星船为脚本化单位（停泊/拖拽/包裹），不参与空间分离，否则会被港口/目标顶在体外无法入港。
+    const units = all.filter(u => u.alive && u.mode !== "dock" && u.state !== "anchor" && u.entity !== "devourer");
     const shift = (unit, x, y) => {
       unit.x += x; unit.y += y;
-      if (unit.entity === "carrier" || unit.entity === "gun") {
+      if (unit.entity === "carrier" || unit.entity === "gun" || unit.entity === "harbor") {
         unit.orbitMotion.x += x; unit.orbitMotion.y += y;
       }
     };

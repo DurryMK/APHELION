@@ -8,7 +8,7 @@ globalThis.SolarCivilization = (() => {
     return { population: 0, tech: 0, research: 0, shield: 0, lastHit: -Infinity, coreHitUntil: 0,
       incubation: 0, extinct: false, city: false, pressure: 0, consumption: 0,
       cities: SolarConfig.fleet.construction.cityHp.map(maxHp => ({ hp: 0, maxHp, built: false, lastHit: -Infinity })),
-      projects: { shield: 0, gun: 0, carrier: 0, devour: 0, city0: 0, city1: 0 } };
+      projects: { shield: 0, gun: 0, carrier: 0, harbor: 0, city0: 0, city1: 0 } };
   }
   function syncCities(body) {
     body.civ.city = body.civ.cities.some(city => city.built && city.hp > 0);
@@ -33,7 +33,7 @@ globalThis.SolarCivilization = (() => {
   }
   function rings(body) {
     const outer = outerRing(body);
-    return { city0: body.radius + CITY0, city1: body.radius + CITY1, shield: outer + SHIELD, gun: outer + GUN, carrier: outer + CARRIER, outer };
+    return { city0: body.radius + CITY0, city1: body.radius + CITY1, shield: outer + SHIELD, gun: outer + GUN, carrier: outer + CARRIER, harbor: outer + GUN, outer };
   }
   function collisionRadius(body) {
     if (body.natural) return body.radius;

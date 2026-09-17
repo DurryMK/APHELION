@@ -40,6 +40,7 @@ globalThis.SolarArtifacts = (() => {
     const artifacts = body.artifacts.filter(unit => unit.alive);
     const guns = artifacts.filter(unit => unit.entity === "gun").sort((a, b) => a.slot - b.slot);
     const mothers = artifacts.filter(unit => unit.entity === "carrier").sort((a, b) => a.slot - b.slot);
+    const harbors = artifacts.filter(unit => unit.entity === "harbor").sort((a, b) => a.slot - b.slot);
     const spec = cfg.gradeFor(c.tech);
     const lowMass = body.mass <= SolarConfig.civilization.minimumMass;
     const ordered = [];
@@ -65,7 +66,8 @@ globalThis.SolarArtifacts = (() => {
     }
     for (const [kind, units, limit, label] of [
       ["gun", guns, c.tech >= 2 ? cfg.gunLimit : 0, "Orbital gun"],
-      ["carrier", mothers, c.tech >= 3 ? spec.mothers : 0, "Carrier"]
+      ["carrier", mothers, c.tech >= 3 ? spec.mothers : 0, "Carrier"],
+      ["harbor", harbors, c.tech >= cfg.harbor.tech ? cfg.harbor.limit : 0, "Devourer harbor"]
     ]) {
       let firstMissing = true;
       for (let slot = 0; slot < limit; slot++) {
