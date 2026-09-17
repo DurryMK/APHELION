@@ -22,7 +22,7 @@ globalThis.SolarFleet = {
     const devour = cfg.devour;
     const atTech = table => owner => table[Math.min(table.length - 1, Math.max(0, owner.civ.tech))];
     const devourLimit = atTech(devour.limit), devourHp = atTech(devour.hp);
-    const devourRate = owner => devour.rate + devour.ratePerTech * owner.civ.tech;
+    const devourRate = owner => (devour.rate + devour.ratePerTech * owner.civ.tech) * (owner.civ.tech >= 8 ? devour.rateFactor8 : 1);
     const harbor = cfg.harbor, harborHp = atTech(harbor.hp);
     // 炮与港口共轨（同角速度，港口错开 60°）；母舰用另一角速度。
     const orbitSpeed = entity => entity === "carrier" ? cfg.carrierOrbitSpeed : cfg.gunOrbitSpeed;
@@ -52,7 +52,7 @@ globalThis.SolarFleet = {
     // 无抵抗能力的天体：无护盾/城市/舰队的行星；7 级起可吞恒星，虚空永不可吞。
     function devourable(owner, target) {
       if (!target.alive || target.entity || own(owner, target) || target.devouredBy) return false;
-      if (target.natural) return owner.civ.tech >= 7 && target.type !== 10;
+      if (target.natural) return target.type === 10 ? owner.civ.tech >= 10 : owner.civ.tech >= 7;
       return !CIV.hasProducts(target);
     }
     function enemy(owner, target) {
@@ -162,7 +162,7 @@ globalThis.SolarFleet = {
         }
         for (const mother of group.mothers) {
           const assigned = group.planes.filter(p => p.mother === mother);
-          assigned.forEach((p, i) => { p.retiring = i >= spec.perMother; if (p.retiring && p.mode !== "dock") p.mode = "return"; });
+          assigned.forEach((p, i) => { p.retiring = i >= cfg.perMotherFor(owner.civ.tech); if (p.retiring && p.mode !== "dock") p.mode = "return"; });
         }
         // 已靠港的远处舰队保留状态，停止生产、决策和移动。
         group.sleeping = !group.enabled && group.planes.every(p => p.mode === "dock") && group.devourers.every(u => u.state === "orbit");
@@ -212,8 +212,9 @@ globalThis.SolarFleet = {
       else if (c.tech >= 2 && group.guns.filter(g => g.alive).length < cfg.gunLimit) kind = "gun";
       else if (c.tech >= 3 && group.mothers.filter(m => m.alive).length < grade(owner).mothers) kind = "carrier";
       else if (c.tech >= harbor.tech && group.harbors.filter(h => h.alive).length < harbor.limit) kind = "harbor";
-      else if (c.tech >= 5 && !c.cities[0].built) kind = "city0";
-      else if (c.tech >= 6 && !c.cities[1].built) kind = "city1";
+      else if (c.tech >= cfg.construction.cityTech[0] && !c.cities[0].built) kind = "city0";
+      else if (c.tech >= cfg.construction.cityTech[1] && !c.cities[1].built) kind = "city1";
+      else if (c.tech >= cfg.construction.cityTech[2] && !c.cities[2].built) kind = "city2";
       if (!kind) return;
       if (kind.startsWith("city")) {
         const index = Number(kind[4]), city = c.cities[index], cost = cfg.construction.cost.city[index];
@@ -257,7 +258,7 @@ globalThis.SolarFleet = {
         let patrolCount = patrols.length;
         for (const mother of group.mothers) {
           if (!mother.alive || !group.enabled || now < owner.civ.coreHitUntil) continue;
-          if (group.planes.filter(p => p.alive && p.mother === mother).length >= spec.perMother) continue;
+          if (group.planes.filter(p => p.alive && p.mother === mother).length >= cfg.perMotherFor(owner.civ.tech)) continue;
           mother.buildProgress += CIV.fund(owner, Math.min(1 - mother.buildProgress,
             cfg.decisionInterval * CIV.buildSpeed(owner) / spec.production), spec.cost);
           if (mother.buildProgress < 1 - 1e-9) continue;
@@ -519,9 +520,10 @@ globalThis.SolarFleet = {
         (item.entity === "gun" ? group.guns : item.entity === "harbor" ? group.harbors : group.mothers).push(unit); units.push(unit);
       }
       // 舰载机全部重新靠港，按载机量分配到各母舰。
-      let remaining = Math.max(0, Math.min(saved.planes | 0, group.mothers.length * spec.perMother));
+      const perMother = cfg.perMotherFor(owner.civ.tech);
+      let remaining = Math.max(0, Math.min(saved.planes | 0, group.mothers.length * perMother));
       for (const mother of group.mothers) {
-        const count = Math.min(spec.perMother, remaining);
+        const count = Math.min(perMother, remaining);
         for (let i = 0; i < count; i++) {
           const plane = { id: context.id(), entity: "drone", ownerId: owner.id, owner, mother,
             x: mother.x, y: mother.y, vx: mother.vx, vy: mother.vy, radius: owner.civ.tech >= 6 ? 3 : 2.5,

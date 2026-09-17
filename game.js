@@ -3,7 +3,7 @@
 (() => {
   const canvas = document.getElementById("universe");
   const ctx = canvas.getContext("2d", { alpha: false });
-  const ui = Object.fromEntries(["stage", "stage-dot", "mass", "speed", "satellites", "next-stage", "progress-text", "progress", "notice", "end-screen", "end-description", "pause", "pause-screen"].map(id => [id, document.getElementById(id)]));
+  const ui = Object.fromEntries(["stage", "stage-subtitle", "stage-dot", "mass", "speed", "satellites", "next-stage", "progress-text", "progress", "notice", "end-screen", "end-description", "pause", "pause-screen"].map(id => [id, document.getElementById(id)]));
   const CONFIG = SolarConfig, CIV = SolarCivilization, GRAVITY = SolarGravity;
   const TYPES = CONFIG.types;
   const STEP = CONFIG.physicsStep, WORLD_RADIUS = 1800;
@@ -63,6 +63,8 @@
   }
   function orbitRadiusLimit(host) { return GRAVITY.captureRange(host) * CAPTURE.orbitRadiusRatio; }
   const typeOf = mass => {
+    // 星级行星：质量达到恒星量级后，主星晋升为高于 Titan 的等级。
+    if (mass >= TYPES[TYPES.length - 1].min) return TYPES.length - 1;
     for (let i = 7; i >= 1; i--) if (mass >= TYPES[i].min) return i;
     return 0;
   };
@@ -86,7 +88,7 @@
 
   function createBody(x, y, mass, velocity = initialVelocity(mass), naturalType = null) {
     const { vx, vy } = velocity;
-    const body = { id: nextId++, x, y, px: x, py: y, vx, vy, ax: 0, ay: 0, mass, integrity: 1, natural: naturalType !== null, type: naturalType, civ: CIV.create(), artifacts: [], kills: { planet: 0, mothership: 0 }, nextAttack: 0, nextAbsorb: 0, recallUntil: 0, hazardReady: 0, alive: true, trail: [], trailAt: 0, host: null, orbitRadius: 0, orbitDirection: 1, captureAfter: 0, cooldown: 0, phase: random(0, Math.PI * 2) };
+    const body = { id: nextId++, x, y, px: x, py: y, vx, vy, ax: 0, ay: 0, mass, integrity: 1, natural: naturalType !== null, type: naturalType, civ: CIV.create(), artifacts: [], kills: { planet: 0, mothership: 0 }, devoured: {}, nextAttack: 0, nextAbsorb: 0, recallUntil: 0, hazardReady: 0, alive: true, trail: [], trailAt: 0, host: null, orbitRadius: 0, orbitDirection: 1, captureAfter: 0, cooldown: 0, phase: random(0, Math.PI * 2) };
     updateSize(body);
     GRAVITY.limitVelocity(body);
     bodies.push(body);
@@ -390,6 +392,14 @@
 
   function damageUnit(target, amount, attacker, cause) {
     if (!target.alive || target.natural || amount <= 0) return;
+    // 8 级舰载机虚化：按科技有概率完全免疫一次攻击。
+    if (target.entity === "drone" && target.owner?.civ) {
+      const phase = target.owner.civ.tech >= 10 ? .45 : target.owner.civ.tech >= 8 ? .3 : 0;
+      if (phase > 0 && Math.random() < phase) {
+        if (!outsideView(target.x, target.y)) burst(target.x, target.y, "#b8f2ff", 3, 14);
+        return;
+      }
+    }
     rememberAttack(target, attacker);
     if (target === player && cause === "laser" && time - target.civ.lastHit >= 5 && performance.now() - lastAttackNotice >= 12000) {
       lastAttackNotice = performance.now();
@@ -415,7 +425,7 @@
     }
     amount -= shieldLoss;
     if (amount <= 0) return;
-    for (let i = 1; i >= 0 && amount > 0; i--) {
+    for (let i = c.cities.length - 1; i >= 0 && amount > 0; i--) {
       const city = c.cities[i], loss = Math.min(city.hp, amount);
       city.hp -= loss; amount -= loss;
       if (loss > 0) city.lastHit = time;
@@ -491,7 +501,9 @@
       if (body === player) {
         if (body.civ.tech > oldTech) announce(["", "Shield construction unlocked", "Orbital guns unlocked",
           "Orbital carriers unlocked", "Fleet expansion unlocked", "Space city construction unlocked",
-          "Second city construction unlocked", "Stellar mining is now possible"][body.civ.tech]);
+          "Second city construction unlocked", "Stellar mining is now possible",
+          "Devour speed increased · Phase shielding online", "Third city ring · Carrier capacity increased",
+          "Void capture · Phase mastery"][body.civ.tech]);
         if (!hadLife && body.civ.population > 0) announce("Life has emerged on your world");
         if (body.extinctionEvent) { announce("Your civilization has fallen silent"); body.extinctionEvent = false; }
       }
@@ -660,7 +672,7 @@
     burst(b.x, b.y, TYPES[b.type].color, a === player ? 13 : 4, 16);
     if (a === player) {
       limitPlayerSpeed();
-      absorbed++; peakMass = Math.max(peakMass, a.mass);
+      absorbed++; peakMass = Math.max(peakMass, a.mass); recordDevour(a, TYPES[b.type].kind);
       if (a.type !== oldType) {
         burst(a.x, a.y, TYPES[a.type].color, 60, 60);
       }
@@ -857,9 +869,17 @@
     }
   }
 
+  // 记录吞噬的天体种类与数量，供文明称号使用。
+  function recordDevour(body, kind) {
+    if (!body) return;
+    if (!body.devoured) body.devoured = {};
+    body.devoured[kind] = (body.devoured[kind] || 0) + 1;
+  }
+
   function harvestMass(target, amount, owner, now) {
     if (!target.alive || amount <= 0 || target === owner || target.host === owner.id ||
-        target.natural && (owner.civ.tech < 7 || target.type === 10) || !target.natural && CIV.hasProducts(target)) return 0;
+        target.natural && (target.type === 10 ? owner.civ.tech < 10 : owner.civ.tech < 7) ||
+        !target.natural && CIV.hasProducts(target)) return 0;
     const before = target.mass, taken = Math.min(before, amount);
     target.mass -= taken;
     if (!target.natural && taken > 0) {
@@ -868,6 +888,7 @@
       CIV.suffer(target, taken / Math.max(.1, before) * CONFIG.civilization.harvestPopulationMultiplier);
     }
     if (target.mass < .6) {
+      recordDevour(owner, TYPES[target.type].kind);
       if (target.natural) { target.alive = false; burst(target.x, target.y, "#ffdc94", 20, 20); }
       else destroyUnit(target, owner, "harvest");
     } else {
@@ -886,6 +907,17 @@
     refreshHud();
   }
 
+  // 按人口、科技、吞噬分组取各自已达成的最高称号。
+  function titleParts(civ, devoured) {
+    let population = null, tech = null, devour = null;
+    for (const title of CONFIG.titles) {
+      if (title.population && civ.population >= title.population) population = title.name;
+      if (title.tech && civ.tech >= title.tech) tech = title.name;
+      if (title.devour && (devoured?.[title.devour.kind] || 0) >= title.devour.count) devour = title.name;
+    }
+    return { population, tech, devour };
+  }
+
   function playerSnapshot() {
     const c = player.civ;
     return {
@@ -898,6 +930,7 @@
         projects: { ...c.projects }
       },
       fleet: fleets.snapshot(player, time),
+      devoured: { ...player.devoured },
       kills: { planet: player.kills.planet, mothership: player.kills.mothership }
     };
   }
@@ -910,10 +943,11 @@
     return {
       savedAt: 0,
       mass: 8, integrity: 1, peakMass: 8, absorbed: 0, elapsed: 0, distance: 0,
+      devoured: {},
       civ: {
         population: 0, tech: 0, research: 0, shield: 0, incubation: 0,
         cities: CONFIG.fleet.construction.cityHp.map(() => ({ hp: 0, built: false })),
-        projects: { shield: 0, gun: 0, carrier: 0, harbor: 0, city0: 0, city1: 0 }
+        projects: { shield: 0, gun: 0, carrier: 0, harbor: 0, city0: 0, city1: 0, city2: 0 }
       },
       fleet: { facilities: [], planes: 0, devourers: 0 },
       kills: { planet: 0, mothership: 0 }
@@ -934,7 +968,7 @@
     const rc = raw.civ && typeof raw.civ === "object" ? raw.civ : {};
     c.population = Math.max(0, finite(rc.population, 0));
     if (c.population > 0 && c.population < CONFIG.civilization.extinctionPopulation) c.population = 0;
-    c.tech = intIn(rc.tech, 0, 0, 7);
+    c.tech = intIn(rc.tech, 0, 0, CONFIG.technology.length - 1);
     c.research = Math.max(0, finite(rc.research, 0));
     c.shield = Math.max(0, finite(rc.shield, 0));
     c.incubation = Math.max(0, finite(rc.incubation, 0));
@@ -957,6 +991,12 @@
     const rk = raw.kills && typeof raw.kills === "object" ? raw.kills : {};
     s.kills.planet = Math.max(0, Math.round(finite(rk.planet, 0)));
     s.kills.mothership = Math.max(0, Math.round(finite(rk.mothership, 0)));
+
+    const rd = raw.devoured && typeof raw.devoured === "object" ? raw.devoured : {};
+    for (const [kind, count] of Object.entries(rd)) {
+      const n = Math.max(0, Math.round(finite(count, 0)));
+      if (n > 0) s.devoured[kind] = n;
+    }
 
     const rf = raw.fleet && typeof raw.fleet === "object" ? raw.fleet : {};
     const slots = new Set();
@@ -995,8 +1035,9 @@
     if (!player?.alive) return CONFIG.savePrefix;
     const pad = n => String(n).padStart(2, "0"), now = new Date();
     const stamp = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}-${pad(now.getMinutes())}-${pad(now.getSeconds())}`;
-    const title = CONFIG.populationTitles.filter(t => player.civ.population >= t.population).at(-1);
-    return `${TYPES[player.type].name} - ${title ? title.name : TYPES[0].name} - ${stamp}`;
+    const parts = titleParts(player.civ, player.devoured);
+    const name = [TYPES[player.type].name, parts.population, parts.tech, parts.devour].filter(Boolean).join(" - ");
+    return `${name || TYPES[0].name} - ${stamp}`;
   }
 
   function readSave() {
@@ -1048,6 +1089,7 @@
       projects: { ...snapshot.civ.projects }
     });
     player.kills = { planet: snapshot.kills.planet, mothership: snapshot.kills.mothership };
+    player.devoured = { ...snapshot.devoured };
     nextPopulation = time + 2;
     player.vx = 0; player.vy = 0;
     updateSize(player);
@@ -1191,8 +1233,7 @@
     }
     // 太空电梯：锚点随地表自转，连接主星与各城市环。
     const spin = time * .14 + b.phase, radii = [r];
-    if (c.cities[0].hp > 0) radii.push(ring.city0 * zoom);
-    if (c.cities[1].hp > 0) radii.push(ring.city1 * zoom);
+    for (let i = 0; i < c.cities.length; i++) if (c.cities[i].hp > 0) radii.push(ring["city" + i] * zoom);
     if (radii.length > 1) for (let i = 0; i < 3; i++) {
       const angle = spin + i * TAU / 3, cos = Math.cos(angle), sin = Math.sin(angle);
       ctx.save(); ctx.globalAlpha = .12 + vitality * .3;
@@ -1283,7 +1324,8 @@
       }
       ctx.globalAlpha = 1;
     }
-    for (let layer = 0; layer < 2; layer++) {
+    const cityStroke = ["#514c67", "#445b70", "#4a6f86"], cityEdge = ["#a49bb6", "#8faebc", "#a9e8df"];
+    for (let layer = 0; layer < c.cities.length; layer++) {
       const city = c.cities[layer]; if (city.hp <= 0) continue;
       const outer = ring["city" + layer] * camera.zoom;
       const thickness = (city.built ? 2.6 + layer * .4 : .8) * camera.zoom;
@@ -1291,15 +1333,15 @@
       ctx.save(); ctx.globalAlpha = city.built ? .9 : .35;
       if (!city.built) ctx.setLineDash([2 * camera.zoom, 4 * camera.zoom]);
       ctx.beginPath(); ctx.arc(x, y, radius, 0, Math.PI * 2);
-      ctx.strokeStyle = layer ? "#445b70" : "#514c67"; ctx.lineWidth = thickness; ctx.stroke();
+      ctx.strokeStyle = cityStroke[layer] || "#514c67"; ctx.lineWidth = thickness; ctx.stroke();
       if (city.built) {
         ctx.setLineDash([]); ctx.lineWidth = .45 * camera.zoom;
         for (const edge of [outer - .2 * camera.zoom, outer - thickness + .2 * camera.zoom]) {
           ctx.beginPath(); ctx.arc(x, y, edge, 0, Math.PI * 2);
-          ctx.strokeStyle = layer ? "#8faebc" : "#a49bb6"; ctx.stroke();
+          ctx.strokeStyle = cityEdge[layer] || "#a49bb6"; ctx.stroke();
         }
       }
-      const segments = layer ? 14 : 10;
+      const segments = 10 + layer * 4;
       for (let i = 0; i < segments; i++) {
         const angle = b.phase + i * Math.PI * 2 / segments;
         ctx.save(); ctx.translate(x + Math.cos(angle) * radius, y + Math.sin(angle) * radius); ctx.rotate(angle);
@@ -1393,7 +1435,7 @@
     const owner = ship.owner, zoom = camera.zoom;
     if ((ship.state === "wrapping" || ship.state === "anchor") && ship.target?.alive) {
       const tx = screenX(ship.target.x), ty = screenY(ship.target.y), tr = ship.target.radius * zoom;
-      const style = owner.civ.tech >= 7 ? 2 : owner.civ.tech >= 5 ? 1 : 0;
+      const style = owner.civ.tech >= 10 ? 3 : owner.civ.tech >= 7 ? 2 : owner.civ.tech >= 5 ? 1 : 0;
       const wrapping = ship.state === "wrapping";
       const progress = Math.max(0, Math.min(1, 1 - (ship.harvestAt - time) / CONFIG.fleet.devour.wrapDuration));
       const closure = progress * progress * (3 - 2 * progress);
@@ -1413,10 +1455,10 @@
           ctx.restore();
         }
       }
-      if (style === 2) {
+      if (style >= 2) {
         ctx.globalAlpha = .45 + .3 * Math.sin(time * 3 + ship.id);
         ctx.beginPath(); ctx.arc(tx, ty, tr + 6 * zoom, time * .8, time * .8 + 2.2);
-        ctx.strokeStyle = "#7dffa0"; ctx.lineWidth = Math.max(.6, 1.4 * zoom); ctx.stroke();
+        ctx.strokeStyle = style >= 3 ? "#e8ffd0" : "#7dffa0"; ctx.lineWidth = Math.max(.6, 1.4 * zoom); ctx.stroke();
       }
       ctx.restore();
       // 能量薄膜包裹目标，吞噬开始后沿弧线向主星方向输送粒子。
@@ -1429,7 +1471,7 @@
       const haloRadius = Math.max(1, tr + 12 * zoom);
       const halo = ctx.createRadialGradient(tx, ty, Math.max(0, tr * .65), tx, ty, haloRadius);
       halo.addColorStop(0, "#7dffa000");
-      halo.addColorStop(.6, style === 2 ? "#a6ffb655" : "#76ffb055");
+      halo.addColorStop(.6, style >= 3 ? "#dcffe855" : style === 2 ? "#a6ffb655" : "#76ffb055");
       halo.addColorStop(1, "#7dffa000");
       ctx.globalAlpha = energy;
       circle(tx, ty, haloRadius, halo);
@@ -1465,7 +1507,8 @@
       ctx.restore();
     }
     ctx.save(); ctx.translate(x, y); ctx.rotate(time * .5 + ship.id);
-    ctx.fillStyle = "#1f3a2c"; ctx.strokeStyle = "#8fe6a8"; ctx.lineWidth = .6 * zoom;
+    const ascended = owner.civ.tech >= 10;
+    ctx.fillStyle = ascended ? "#24503a" : "#1f3a2c"; ctx.strokeStyle = ascended ? "#d8ffe0" : "#8fe6a8"; ctx.lineWidth = .6 * zoom;
     for (let i = 0; i < 3; i++) {
       const a = i * TAU / 3;
       ctx.beginPath(); ctx.moveTo(0, 0);
@@ -1473,7 +1516,7 @@
       ctx.lineTo(Math.cos(a + .7) * r, Math.sin(a + .7) * r);
       ctx.closePath(); ctx.fill(); ctx.stroke();
     }
-    circle(0, 0, r * .7, "#7fe0a0");
+    circle(0, 0, r * .7, ascended ? "#e0ffd8" : "#7fe0a0");
     ctx.restore();
   }
   function drawShip(ship) {
@@ -1485,18 +1528,19 @@
     ctx.rotate(ship.entity === "mothership" ? time * .05 : ship.entity === "gun" ? ship.aim : Math.atan2(ship.vy, ship.vx));
     if (ship.entity === "mothership") drawMothership(ship, r);
     else if (ship.entity === "carrier") {
-      ctx.fillStyle = "#344c60"; ctx.strokeStyle = "#90b7c3"; ctx.lineWidth = .6 * camera.zoom;
+      const advanced = ship.owner?.civ?.tech >= 8;
+      ctx.fillStyle = advanced ? "#3a5a48" : "#344c60"; ctx.strokeStyle = advanced ? "#9fe6b8" : "#90b7c3"; ctx.lineWidth = .6 * camera.zoom;
       ctx.beginPath(); ctx.moveTo(r, 0); ctx.lineTo(r * .45, r * .32); ctx.lineTo(-r * .85, r * .38);
       ctx.lineTo(-r, 0); ctx.lineTo(-r * .85, -r * .38); ctx.lineTo(r * .45, -r * .32);
       ctx.closePath(); ctx.fill(); ctx.stroke();
       for (const side of [-1, 1]) {
-        ctx.fillStyle = "#62788a";
+        ctx.fillStyle = advanced ? "#6f9a7f" : "#62788a";
         ctx.fillRect(-r * .7, side * r * .55 - r * .12, r * 1.05, r * .24);
         ctx.fillStyle = "#142331";
         ctx.fillRect(-r * .45, side * r * .55 - r * .05, r * .55, r * .1);
         ctx.fillStyle = "#a7e4de";
         ctx.fillRect(r * .15, side * r * .55 - r * .04, r * .12, r * .08);
-        glow(-r * .8, side * r * .5, r * .45, "#6bcbff40");
+        glow(-r * .8, side * r * .5, r * .45, advanced ? "#8fe6a840" : "#6bcbff40");
       }
       ctx.fillStyle = "#172b3e"; ctx.fillRect(-r * .45, -r * .13, r * .9, r * .26);
       ctx.fillStyle = "#9bddd9"; ctx.fillRect(r * .28, -r * .09, r * .25, r * .18);
@@ -1547,11 +1591,13 @@
     }
     else {
       const isDrone = ship.entity === "drone", player0 = isDrone && ship.owner === player;
-      // 7 级舰载机：黑色机身 + 光效描边。
-      const elite = isDrone && ship.owner && ship.owner.civ && ship.owner.civ.tech >= 7;
-      const tint = elite ? (player0 ? "#7ff0ff" : "#cf9dff") : null;
+      const tech = isDrone && ship.owner?.civ ? ship.owner.civ.tech : 0;
+      // 7 级黑色精英；8 级虚化（半透明绿）；10 级飞升（金白）。
+      const elite = tech >= 7, phase = tech >= 8, ascendant = tech >= 10;
+      const tint = elite ? (ascendant ? (player0 ? "#ffe9a8" : "#ffd0f0") : phase ? (player0 ? "#9cffc4" : "#d8b0ff") : (player0 ? "#7ff0ff" : "#cf9dff")) : null;
       const edge = isDrone ? tint || "#d0f6ff" : CONFIG.nests.grades[ship.grade].color;
-      const hull = elite ? "#070a12" : isDrone ? (player0 ? "#74c9d1" : "#bc8ade") : CONFIG.nests.grades[ship.grade].hull;
+      const hull = elite ? (ascendant ? "#161006" : phase ? "#06130d" : "#070a12") : isDrone ? (player0 ? "#74c9d1" : "#bc8ade") : CONFIG.nests.grades[ship.grade].hull;
+      if (phase) ctx.globalAlpha = .78;
       // 细长箭形机身 + 两侧后掠翼
       ctx.beginPath();
       ctx.moveTo(r, 0);
@@ -1705,8 +1751,9 @@
     if (choosingStart) return;
     const type = TYPES[player.type], c = player.civ, growth = CIV.progress(player);
     const percent = growth.total > 0 ? clamp(growth.value / growth.total * 100, 0, 100) : 0;
-    const title = CONFIG.populationTitles.filter(t => c.population >= t.population).at(-1);
-    SolarLanguage.text(ui.stage, type.name + (title ? " - " + title.name : "")); ui["stage-dot"].style.background = type.color; ui["stage-dot"].style.color = type.color;
+    const parts = titleParts(c, player.devoured);
+    SolarLanguage.text(ui.stage, [type.name, parts.population].filter(Boolean).join(" - "));
+    SolarLanguage.text(ui["stage-subtitle"], [parts.tech, parts.devour].filter(Boolean).join(" - ")); ui["stage-dot"].style.background = type.color; ui["stage-dot"].style.color = type.color;
     SolarLanguage.text(ui.mass, player.mass.toFixed(1)); SolarLanguage.text(ui.speed, Math.hypot(player.vx, player.vy).toFixed(1));
     // 结构完整度只受战斗损伤和补充质量影响，供养不消耗完整度。
     const integrity = clamp(player.integrity * 100, 0, 100);
@@ -1931,9 +1978,9 @@
     const entry = document.createElement("span");
     entry.style.setProperty("--color", type.color);
     SolarLanguage.text(entry, type.name);
-    SolarLanguage.attribute(entry, "title", `${type.natural ? `Natural body · Mass ${type.mass} · ${type.kind === "black-hole" ? "Cannot be captured or mined" : "Cannot be captured; technology 7 can mine it"}` : `Mass ≥ ${type.min} · Satellite cap ${satelliteLimit(TYPES.indexOf(type))}`} · Gravity reach ${type.gravityRange} km`);
+    SolarLanguage.attribute(entry, "title", `${type.natural ? `Natural body · Mass ${type.mass} · ${type.kind === "black-hole" ? "Technology 10 can devour it" : "Cannot be captured; technology 7 can mine it"}` : `Mass ≥ ${type.min} · Satellite cap ${satelliteLimit(TYPES.indexOf(type))}`} · Gravity reach ${type.gravityRange} km`);
     legend.append(entry);
-    if (type.natural) continue;
+    if (type.natural || TYPES.indexOf(type) > 7) continue;
     const index = TYPES.indexOf(type);
     const label = document.createElement("label");
     label.className = "start-option"; label.style.setProperty("--color", type.color);

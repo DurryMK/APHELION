@@ -81,7 +81,7 @@ globalThis.SolarArtifacts = (() => {
       if (units.length < limit) queued = true;
     }
     c.cities.forEach((city, index) => {
-      if (c.tech < index + 5) return;
+      if (c.tech < cfg.construction.cityTech[index]) return;
       if (city.built) add("city" + index, `Space city ${index + 1}`,
         condition(city, Math.max(c.lastHit, city.lastHit)), city.hp, city.maxHp);
       else {
@@ -102,7 +102,7 @@ globalThis.SolarArtifacts = (() => {
           (plane.mode === "dock" ? "" : ` · Endurance ${Math.max(0, Math.ceil(plane.expires - now))} s`);
         add("ship" + plane.id, `Ship ${mother.slot + 1}.${index + 1}`, status, plane.hp, plane.maxHp, false, details);
       });
-      if (planes.length < spec.perMother) add("production" + mother.id, `Carrier ${mother.slot + 1} · Ship`,
+      if (planes.length < cfg.perMotherFor(c.tech)) add("production" + mother.id, `Carrier ${mother.slot + 1} · Ship`,
         buildState(true), mother.buildProgress, 1, true);
     }
     const devourers = artifacts.filter(unit => unit.entity === "devourer").sort((a, b) => a.id - b.id);

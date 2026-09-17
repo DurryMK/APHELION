@@ -8,7 +8,7 @@ globalThis.SolarCivilization = (() => {
     return { population: 0, tech: 0, research: 0, shield: 0, lastHit: -Infinity, coreHitUntil: 0,
       incubation: 0, extinct: false, city: false, pressure: 0, consumption: 0,
       cities: SolarConfig.fleet.construction.cityHp.map(maxHp => ({ hp: 0, maxHp, built: false, lastHit: -Infinity })),
-      projects: { shield: 0, gun: 0, carrier: 0, harbor: 0, city0: 0, city1: 0 } };
+      projects: { shield: 0, gun: 0, carrier: 0, harbor: 0, city0: 0, city1: 0, city2: 0 } };
   }
   function syncCities(body) {
     body.civ.city = body.civ.cities.some(city => city.built && city.hp > 0);
@@ -26,14 +26,14 @@ globalThis.SolarCivilization = (() => {
     return Math.min(SolarConfig.fleet.construction.maxSpeed, 1 + Math.log2(Math.max(1, body.civ.population / config.seedPopulation)) * .25);
   }
   // 轨道环间距：留出更宽的视觉空隙。
-  const CITY0 = 12, CITY1 = 26, SHIELD = 8, GUN = 32, CARRIER = 52;
+  const CITY0 = 12, CITY1 = 26, CITY2 = 40, SHIELD = 8, GUN = 32, CARRIER = 52;
   function outerRing(body) {
     const c = body.civ;
-    return c.cities[1].hp > 0 ? body.radius + CITY1 : c.cities[0].hp > 0 ? body.radius + CITY0 : body.radius;
+    return c.cities[2]?.hp > 0 ? body.radius + CITY2 : c.cities[1].hp > 0 ? body.radius + CITY1 : c.cities[0].hp > 0 ? body.radius + CITY0 : body.radius;
   }
   function rings(body) {
     const outer = outerRing(body);
-    return { city0: body.radius + CITY0, city1: body.radius + CITY1, shield: outer + SHIELD, gun: outer + GUN, carrier: outer + CARRIER, harbor: outer + GUN, outer };
+    return { city0: body.radius + CITY0, city1: body.radius + CITY1, city2: body.radius + CITY2, shield: outer + SHIELD, gun: outer + GUN, carrier: outer + CARRIER, harbor: outer + GUN, outer };
   }
   function collisionRadius(body) {
     if (body.natural) return body.radius;

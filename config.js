@@ -12,12 +12,13 @@ globalThis.SolarConfig = {
     { name: "Titan", min: 1600, radius: 7.5, color: "#e5b65f", kind: "gas", level: 6, gravityRange: 210 },
     { name: "Sol", mass: 8000, radius: 13, color: "#ffda78", kind: "star", natural: true, gravityRange: 280, hazardRange: 64 },
     { name: "Pulsar", mass: 14000, radius: 9, color: "#a28aff", kind: "neutron", natural: true, gravityRange: 330, hazardRange: 32 },
-    { name: "Void", mass: 24000, radius: 9, color: "#c49aff", kind: "black-hole", natural: true, gravityRange: 380, hazardRange: 40 }
+    { name: "Void", mass: 24000, radius: 9, color: "#c49aff", kind: "black-hole", natural: true, gravityRange: 380, hazardRange: 40 },
+    { name: "Hyperion", min: 8000, radius: 13, color: "#f4f8ff", kind: "gas", level: 7, gravityRange: 280 }
   ],
   planetSizeSaturationMass: 3200,
   maxBodyRadius: 8,
   regions: { size: 1600, radius: 560, beltChance: .32, nestChance: .18, systemChance: .16, decorationCount: 64 },
-  populationTitles: [
+  titles: [
     { population: 1e7, name: "Dawn" }, { population: 2e7, name: "Hearth" },
     { population: 5e7, name: "Tribe" }, { population: 1e8, name: "Kinship" },
     { population: 2e8, name: "Citadel" }, { population: 5e8, name: "Concord" },
@@ -25,7 +26,16 @@ globalThis.SolarConfig = {
     { population: 5e9, name: "Ascendant" }, { population: 1e10, name: "Celestial" },
     { population: 2e10, name: "Eternal" }, { population: 5e10, name: "Infinity" },
     { population: 1e11, name: "Empyrean" }, { population: 5e11, name: "Cosmos" },
-    { population: 1e12, name: "Omniverse" }
+    { population: 1e12, name: "Omniverse" },
+    { tech: 3, name: "Orbital" }, { tech: 5, name: "Starbound" },
+    { tech: 7, name: "Stellar" }, { tech: 8, name: "Starforged" }, { tech: 9, name: "Ringbuilder" }, { tech: 10, name: "Singular" },
+    { devour: { kind: "asteroid", count: 50 }, name: "Sweeper" },
+    { devour: { kind: "rock", count: 5 }, name: "World Eater" },
+    { devour: { kind: "ice", count: 5 }, name: "Glacier Breaker" },
+    { devour: { kind: "gas", count: 5 }, name: "Gas Harvester" },
+    { devour: { kind: "star", count: 1 }, name: "Sun Eater" },
+    { devour: { kind: "neutron", count: 1 }, name: "Pulsar Thief" },
+    { devour: { kind: "black-hole", count: 1 }, name: "Voidbringer" }
   ],
   physicsStep: 1 / 120,
   gravity: {
@@ -52,14 +62,17 @@ globalThis.SolarConfig = {
       { referencePopulation: 100000000, research: 70, shield: 110, damage: 3, range: 70, interval: .4 },
       { referencePopulation: 500000000, research: 100, shield: 160, damage: 3.5, range: 75, interval: .35 },
       { referencePopulation: 2000000000, research: 140, shield: 220, damage: 4, range: 80, interval: .3 },
-      { referencePopulation: 8000000000, research: 180, shield: 260, damage: 4.5, range: 85, interval: .3 }
+      { referencePopulation: 8000000000, research: 180, shield: 260, damage: 4.5, range: 85, interval: .3 },
+      { referencePopulation: 20000000000, research: 260, shield: 300, damage: 5, range: 90, interval: .28 },
+      { referencePopulation: 50000000000, research: 360, shield: 350, damage: 5.5, range: 95, interval: .26 },
+      { referencePopulation: 100000000000, research: 480, shield: 420, damage: 6, range: 100, interval: .24 }
     ],
     shieldDelay: 5, shieldRegenFraction: .05, cityShieldDelay: 3, cityShieldRegenFraction: .08,
     mothershipResearchReward: 8
   },
   fleet: {
     construction: { shield: 60, gun: 25, carrier: 40, city: 90, devour: 70, harbor: 100, maxSpeed: 4,
-      cost: { gun: 8, carrier: 20, city: [40, 80], devour: 45, harbor: 70 }, cityHp: [200, 350] },
+      cost: { gun: 8, carrier: 20, city: [40, 80, 140], devour: 45, harbor: 70 }, cityHp: [200, 350, 520], cityTech: [5, 6, 9] },
     repair: { delay: 5, fraction: .03, dockedFraction: .15, fullCostRatio: .6 },
     gunLimit: 3, gunHp: 100, carrierHp: 180, threatMemory: 5,
     decisionInterval: .2, searchInterval: .8, recallSeconds: 10, activeCivilizations: 5,
@@ -75,12 +88,13 @@ globalThis.SolarConfig = {
       { mothers: 3, perMother: 4, hp: 90, damage: 5, interval: .28, ammo: 44, range: 640, attackRange: 105, speed: 120, supply: 1.4, production: 9, cost: 3.5, endurance: 90 }
     ],
     gradeFor(tech) { return this.grades[Math.min(this.grades.length - 1, Math.max(0, tech - 3))]; },
+    perMotherFor(tech) { return this.gradeFor(tech).perMother + (tech >= 9 ? 1 : 0); },
     // 吞星船：专职吞噬，无攻击；数量与血量随科技提升，2/5/7 级张开形态不同。
     devour: {
       limit: [0, 0, 1, 1, 1, 2, 2, 2],
       hp: [0, 0, 420, 560, 720, 900, 1100, 1350],
       radius: 1.6, speed: 50, towSpeed: 55, towGap: 14, towOrbit: .06,
-      rate: 4, ratePerTech: 1.5, overrunDamage: 8, wrapDuration: 3
+      rate: 4, ratePerTech: 1.5, rateFactor8: 1.5, overrunDamage: 8, wrapDuration: 3
     },
     // 吞星船港口：与母舰同轨、体积更大、血量高且可被攻击，无攻击能力，用于停泊两艘吞星船。
     harbor: {
