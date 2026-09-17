@@ -26,7 +26,7 @@ globalThis.SolarCivilization = (() => {
     return Math.min(SolarConfig.fleet.construction.maxSpeed, 1 + Math.log2(Math.max(1, body.civ.population / config.seedPopulation)) * .25);
   }
   // 轨道环间距：留出更宽的视觉空隙。
-  const CITY0 = 12, CITY1 = 26, SHIELD = 8, GUN = 24, CARRIER = 44;
+  const CITY0 = 12, CITY1 = 26, SHIELD = 8, GUN = 32, CARRIER = 52;
   function outerRing(body) {
     const c = body.civ;
     return c.cities[1].hp > 0 ? body.radius + CITY1 : c.cities[0].hp > 0 ? body.radius + CITY0 : body.radius;

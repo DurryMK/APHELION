@@ -64,21 +64,24 @@ globalThis.SolarConfig = {
     gunLimit: 3, gunHp: 100, carrierHp: 180, threatMemory: 5,
     decisionInterval: .2, searchInterval: .8, recallSeconds: 10, activeCivilizations: 5,
     activationRadius: 1100, searchCell: 180,
-    steering: 1.8, acceleration: 48, carrierOrbitSpeed: .07,
+    steering: 1.8, acceleration: 48, gunOrbitSpeed: .08, carrierOrbitSpeed: .055, devourOrbitSpeed: .11,
     patrolRatio: 1 / 3, patrolRangeRatio: .35, patrolOrbitSpeed: .1, stableSeconds: 4, stableAcceleration: 4,
     grades: [
       { mothers: 1, perMother: 3, hp: 12, damage: 1, interval: .4, ammo: 20, range: 260, attackRange: 65, speed: 65, supply: 3, production: 12, cost: 1, endurance: 45 },
       { mothers: 3, perMother: 4, hp: 16, damage: 1.2, interval: .4, ammo: 24, range: 360, attackRange: 75, speed: 80, supply: 3, production: 11, cost: 1.5, endurance: 55 },
       { mothers: 3, perMother: 4, hp: 20, damage: 1.5, interval: .35, ammo: 30, range: 440, attackRange: 85, speed: 95, supply: 2, production: 10, cost: 2, endurance: 65 },
-      { mothers: 3, perMother: 4, hp: 36, damage: 2.5, interval: .3, ammo: 40, range: 600, attackRange: 95, speed: 115, supply: 1.5, production: 9, cost: 3, endurance: 80 }
+      { mothers: 3, perMother: 4, hp: 36, damage: 2.5, interval: .3, ammo: 40, range: 600, attackRange: 95, speed: 115, supply: 1.5, production: 9, cost: 3, endurance: 80 },
+      // 7 级精英舰：血量与攻击大幅提升，外观转为黑色光效。
+      { mothers: 3, perMother: 4, hp: 90, damage: 5, interval: .28, ammo: 44, range: 640, attackRange: 105, speed: 120, supply: 1.4, production: 9, cost: 3.5, endurance: 90 }
     ],
+    gradeFor(tech) { return this.grades[Math.min(this.grades.length - 1, Math.max(0, tech - 3))]; },
     // 吞星船：专职吞噬，无攻击；数量与血量随科技提升，2/5/7 级张开形态不同。
     devour: {
       tech: 2,
       limit: [0, 0, 1, 1, 1, 2, 2, 2],
       hp: [0, 0, 420, 560, 720, 900, 1100, 1350],
-      radius: 2.5, speed: 80, towSpeed: 55, towGap: 14, orbitOffset: 6,
-      rate: 4, ratePerTech: 1.5, overrunDamage: 8
+      radius: 2.5, speed: 80, towSpeed: 55, towGap: 14, towOrbit: .06, orbitOffset: 16,
+      rate: 4, ratePerTech: 1.5, overrunDamage: 8, wrapDuration: 3
     }
   },
   population: {

@@ -18,12 +18,14 @@ globalThis.SolarFleet = {
     const groups = new Map();
     let units = [], cells = new Map(), nextIndex = 0;
     const distance = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
-    const grade = owner => cfg.grades[Math.min(3, Math.max(0, owner.civ.tech - 3))];
+    const grade = owner => cfg.gradeFor(owner.civ.tech);
     const devour = cfg.devour;
     const atTech = table => owner => table[Math.min(table.length - 1, Math.max(0, owner.civ.tech))];
     const devourLimit = atTech(devour.limit), devourHp = atTech(devour.hp);
     const devourRate = owner => devour.rate + devour.ratePerTech * owner.civ.tech;
     const devourStyle = owner => owner.civ.tech >= 7 ? 2 : owner.civ.tech >= 5 ? 1 : 0;
+    // 三类设施/单位各用不同角速度，形成错落的公转。
+    const orbitSpeed = entity => entity === "gun" ? cfg.gunOrbitSpeed : entity === "carrier" ? cfg.carrierOrbitSpeed : cfg.devourOrbitSpeed;
     function nearby(owner, radius) {
       const result = [];
       for (let x = Math.floor((owner.x - radius) / cfg.searchCell); x <= Math.floor((owner.x + radius) / cfg.searchCell); x++) {
@@ -79,9 +81,9 @@ globalThis.SolarFleet = {
     }
     function facilityAngle(owner, slot, now, entity) {
       const count = entity === "gun" ? cfg.gunLimit : grade(owner).mothers;
-      // 母舰位于相邻轨道炮之间，两组设施保持相同角速度。
+      // 母舰位于相邻轨道炮之间；炮与母舰使用不同角速度，轨道错开。
       const offset = entity === "carrier" ? Math.PI / cfg.gunLimit : 0;
-      return now * cfg.carrierOrbitSpeed + owner.phase + offset + slot * Math.PI * 2 / count;
+      return now * orbitSpeed(entity) + owner.phase + offset + slot * Math.PI * 2 / count;
     }
     function makeFacility(owner, slot, now, entity) {
       const orbit = CIV.rings(owner)[entity];
@@ -91,7 +93,7 @@ globalThis.SolarFleet = {
       const unit = { id: context.id(), entity, ownerId: owner.id, owner, slot,
         x: owner.x + x, y: owner.y + y, vx: owner.vx, vy: owner.vy, radius: entity === "gun" ? 3.5 : 6, alive: true,
         hp, maxHp: hp, aim: angle, lastHit: -Infinity, buildProgress: 0, nextLaunch: now, nextAttack: now,
-        orbitMotion: { x, y, vx: -y * cfg.carrierOrbitSpeed, vy: x * cfg.carrierOrbitSpeed } };
+        orbitMotion: { x, y, vx: -y * orbitSpeed(entity), vy: x * orbitSpeed(entity) } };
       owner.artifacts.push(unit); return unit;
     }
     function makeDevourer(owner, now, slot) {
@@ -99,10 +101,11 @@ globalThis.SolarFleet = {
       const unit = { id: context.id(), entity: "devourer", ownerId: owner.id, owner, slot,
         x: owner.x, y: owner.y, vx: owner.vx, vy: owner.vy, radius: devour.radius,
         hp, maxHp: hp, lastHit: -Infinity, alive: true,
-        state: "orbit", target: null, towing: null, orbitAngle: owner.phase, nextSearch: now };
+        state: "return", target: null, towing: null, orbitAngle: owner.phase, towRadius: 0, towAngle: 0, nextSearch: now };
       owner.artifacts.push(unit); return unit;
     }
     function releaseDevourer(unit) {
+      if (unit.target && unit.target.devourerClaim === unit.id) unit.target.devourerClaim = null;
       if (unit.towing && unit.towing.devouredBy === unit.ownerId) unit.towing.devouredBy = null;
       unit.towing = null;
     }
@@ -190,7 +193,6 @@ globalThis.SolarFleet = {
       const owner = group.owner, c = owner.civ;
       if (!group.enabled || now < c.coreHitUntil || c.population < SolarConfig.civilization.extinctionPopulation) return;
       const elapsed = cfg.decisionInterval * CIV.buildSpeed(owner), project = c.projects;
-      for (const key of ["shield", "gun", "carrier", "devour", "city0", "city1"]) if (typeof project[key] !== "number") project[key] = 0;
       let kind = null;
       if (c.tech >= 1 && c.shield <= 0) kind = "shield";
       else if (c.tech >= 2 && group.guns.filter(g => g.alive).length < cfg.gunLimit) kind = "gun";
@@ -306,24 +308,25 @@ globalThis.SolarFleet = {
           const hp = devourHp(owner);
           if (unit.maxHp !== hp) { unit.hp = Math.min(hp, unit.hp + Math.max(0, hp - unit.maxHp)); unit.maxHp = hp; }
           CIV.repair(owner, unit, cfg.decisionInterval, now, cfg.construction.cost.devour);
-          if (!group.enabled) { if (unit.state === "anchor") { releaseDevourer(unit); unit.state = "orbit"; } continue; }
-          if (unit.state === "anchor") {
+          if (!group.enabled) { if (unit.state !== "orbit") releaseDevourer(unit); unit.state = "orbit"; continue; }
+          if (unit.state === "wrapping" || unit.state === "anchor") {
             if (!unit.target?.alive || own(owner, unit.target) || CIV.hasProducts(unit.target) || distance(unit, owner) > spec.range) { releaseDevourer(unit); unit.state = "return"; }
             continue;
           }
           if (unit.state === "travel") {
-            if (!unit.target || !devourable(owner, unit.target) || distance(unit, owner) > spec.range) { unit.target = null; unit.state = "return"; }
+            if (!unit.target || !devourable(owner, unit.target) || distance(unit, owner) > spec.range) { releaseDevourer(unit); unit.target = null; unit.state = "return"; }
             continue;
           }
-          if (unit.state === "return" || now < unit.nextSearch) continue;
+          // 沿用舰载机的出航速度门槛，按吞星船自身航速判断。
+          if (unit.state === "return" || launchRate(owner, devour) <= 0 || now < unit.nextSearch) continue;
           unit.nextSearch = now + cfg.searchInterval;
           let best = null, bestDistance = spec.range;
           for (const candidate of nearby(owner, spec.range)) {
-            if (!devourable(owner, candidate)) continue;
+            if (!devourable(owner, candidate) || candidate.devourerClaim) continue;
             const d2 = distance(owner, candidate);
             if (d2 < bestDistance) { bestDistance = d2; best = candidate; }
           }
-          if (best) { unit.target = best; unit.state = "travel"; }
+          if (best) { unit.target = best; best.devourerClaim = unit.id; unit.state = "travel"; }
         }
       }
       for (const group of groups.values()) if (!group.sleeping && group.owner.alive) context.resize(group.owner);
@@ -344,8 +347,9 @@ globalThis.SolarFleet = {
           if (!facility.alive) continue;
           const orbit = CIV.rings(owner)[facility.entity];
           const angle = facilityAngle(owner, facility.slot, now, facility.entity);
+          const speed = orbitSpeed(facility.entity);
           const target = { x: Math.cos(angle) * orbit, y: Math.sin(angle) * orbit,
-            vx: -Math.sin(angle) * orbit * cfg.carrierOrbitSpeed, vy: Math.cos(angle) * orbit * cfg.carrierOrbitSpeed };
+            vx: -Math.sin(angle) * orbit * speed, vy: Math.cos(angle) * orbit * speed };
           SolarFleet.steer(facility.orbitMotion, target, spec.speed * .25, cfg.acceleration * .5, cfg.steering, 0, dt);
           facility.orbitMotion.x += facility.orbitMotion.vx * dt; facility.orbitMotion.y += facility.orbitMotion.vy * dt;
           facility.x = owner.x + facility.orbitMotion.x; facility.y = owner.y + facility.orbitMotion.y;
@@ -378,21 +382,33 @@ globalThis.SolarFleet = {
         moveDevourers(group, dt, now);
       }
     }
+    // 吞星船在轨道上的目标点；返航与公转共用，保证状态切换连续、不瞬移。
+    function orbitDesired(owner, unit, now) {
+      const count = Math.max(1, devourLimit(owner));
+      const orbit = CIV.rings(owner).outer + devour.orbitOffset;
+      const angle = now * cfg.devourOrbitSpeed + owner.phase + (unit.slot + 1) * Math.PI * 2 / count;
+      return { x: owner.x + Math.cos(angle) * orbit, y: owner.y + Math.sin(angle) * orbit,
+        vx: owner.vx - Math.sin(angle) * orbit * cfg.devourOrbitSpeed,
+        vy: owner.vy + Math.cos(angle) * orbit * cfg.devourOrbitSpeed };
+    }
     function moveDevourers(group, dt, now) {
       const owner = group.owner, spec = grade(owner);
       for (const unit of group.devourers) {
         if (!unit.alive) continue;
         if (unit.state === "orbit") {
-          const orbit = CIV.rings(owner).outer + devour.orbitOffset;
-          const count = Math.max(1, devourLimit(owner));
-          const angle = now * cfg.carrierOrbitSpeed + owner.phase + (unit.slot + 1) * Math.PI * 2 / count;
-          unit.x = owner.x + Math.cos(angle) * orbit;
-          unit.y = owner.y + Math.sin(angle) * orbit;
-          unit.vx = owner.vx - Math.sin(angle) * orbit * cfg.carrierOrbitSpeed;
-          unit.vy = owner.vy + Math.cos(angle) * orbit * cfg.carrierOrbitSpeed;
+          const dest = orbitDesired(owner, unit, now);
+          unit.x = dest.x; unit.y = dest.y; unit.vx = dest.vx; unit.vy = dest.vy;
           continue;
         }
-        if (unit.state === "anchor") {
+        if (unit.state === "return") {
+          const dest = orbitDesired(owner, unit, now);
+          SolarFleet.steer(unit, dest, devour.speed, cfg.acceleration, cfg.steering, 0, dt);
+          unit.x += unit.vx * dt; unit.y += unit.vy * dt;
+          if (Math.hypot(unit.x - dest.x, unit.y - dest.y) < 8) unit.state = "orbit";
+          if (distance(unit, owner) > spec.range) context.damage(unit, devour.overrunDamage * dt, null, "overrun");
+          continue;
+        }
+        if (unit.state === "wrapping" || unit.state === "anchor") {
           const t = unit.target;
           if (!t?.alive) { releaseDevourer(unit); unit.state = "return"; continue; }
           unit.orbitAngle += dt * .6;
@@ -400,40 +416,43 @@ globalThis.SolarFleet = {
           unit.x = t.x + Math.cos(unit.orbitAngle) * rr;
           unit.y = t.y + Math.sin(unit.orbitAngle) * rr;
           unit.vx = t.vx; unit.vy = t.vy;
-          const taken = context.harvest(t, devourRate(owner) * dt, owner, now);
-          if (taken > 0) context.gain(owner, taken);
-          towTarget(owner, t, dt);
+          // 包裹计时使用模拟时间，跨越结束时刻时只计算实际吞噬时长。
+          const harvestDt = Math.min(dt, Math.max(0, now - unit.harvestAt));
+          if (now >= unit.harvestAt) unit.state = "anchor";
+          if (harvestDt > 0 && distance(unit, owner) <= spec.range) {
+            const taken = context.harvest(t, devourRate(owner) * harvestDt, owner, now);
+            if (taken > 0) context.gain(owner, taken);
+          }
+          towTarget(owner, unit, t, dt);
           if (distance(unit, owner) > spec.range) {
             context.damage(unit, devour.overrunDamage * dt, null, "overrun");
             releaseDevourer(unit); unit.state = "return";
           }
           continue;
         }
-        if (unit.state === "return") {
-          const stop = CIV.collisionRadius(owner) + unit.radius + 4;
-          SolarFleet.steer(unit, { x: owner.x, y: owner.y, vx: owner.vx, vy: owner.vy }, devour.speed, cfg.acceleration, cfg.steering, stop, dt);
-          unit.x += unit.vx * dt; unit.y += unit.vy * dt;
-          if (distance(unit, owner) <= stop + 4) unit.state = "orbit";
-          if (distance(unit, owner) > spec.range) context.damage(unit, devour.overrunDamage * dt, null, "overrun");
-          continue;
-        }
         const t = unit.target;
-        if (!t?.alive) { unit.target = null; unit.state = "return"; continue; }
+        if (!t?.alive) { releaseDevourer(unit); unit.target = null; unit.state = "return"; continue; }
         const stop = SolarSpacing.radius(t) + unit.radius + 3;
         SolarFleet.steer(unit, t, devour.speed, cfg.acceleration, cfg.steering, stop, dt);
         unit.x += unit.vx * dt; unit.y += unit.vy * dt;
         if (distance(unit, t) <= stop + 3) {
-          unit.state = "anchor"; unit.orbitAngle = owner.phase; unit.towing = t; t.devouredBy = owner.id;
+          if (t.devourerClaim === unit.id) t.devourerClaim = null;
+          const minGap = CIV.collisionRadius(owner) + SolarSpacing.radius(t) + devour.towGap;
+          unit.state = "wrapping"; unit.harvestAt = now + devour.wrapDuration;
+          unit.orbitAngle = owner.phase; unit.towing = t; t.devouredBy = owner.id;
+          // 记住锚定瞬间的距离，之后只在该距离上绕主星公转，不再被拉近。
+          unit.towRadius = Math.max(minGap, distance(owner, t));
+          unit.towAngle = Math.atan2(t.y - owner.y, t.x - owner.x);
         }
       }
     }
-    function towTarget(owner, t, dt) {
-      const speed = Math.hypot(owner.vx, owner.vy);
-      let hx, hy;
-      if (speed > 1) { hx = owner.vx / speed; hy = owner.vy / speed; }
-      else { const d = distance(owner, t) || 1; hx = (t.x - owner.x) / d; hy = (t.y - owner.y) / d; }
-      const gap = CIV.collisionRadius(owner) + SolarSpacing.radius(t) + devour.towGap;
-      SolarFleet.steer(t, { x: owner.x - hx * gap, y: owner.y - hy * gap, vx: owner.vx, vy: owner.vy }, devour.towSpeed, cfg.acceleration, cfg.steering, 0, dt);
+    // 被裹挟的天体保持在原距离，绕主星缓慢公转；主星移动时随其一起被带走。
+    function towTarget(owner, unit, t, dt) {
+      unit.towAngle += dt * devour.towOrbit;
+      const cos = Math.cos(unit.towAngle), sin = Math.sin(unit.towAngle), r = unit.towRadius;
+      SolarFleet.steer(t, { x: owner.x + cos * r, y: owner.y + sin * r,
+        vx: owner.vx - sin * r * devour.towOrbit, vy: owner.vy + cos * r * devour.towOrbit },
+        devour.towSpeed, cfg.acceleration, cfg.steering, 0, dt);
     }
     function snapshot(owner, now) {
       const group = groups.get(owner.id);

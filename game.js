@@ -86,7 +86,7 @@
 
   function createBody(x, y, mass, velocity = initialVelocity(mass), naturalType = null) {
     const { vx, vy } = velocity;
-    const body = { id: nextId++, x, y, px: x, py: y, vx, vy, ax: 0, ay: 0, mass, healthyMass: mass, integrity: 1, natural: naturalType !== null, type: naturalType, civ: CIV.create(), artifacts: [], kills: { planet: 0, mothership: 0 }, nextAttack: 0, nextAbsorb: 0, recallUntil: 0, hazardReady: 0, alive: true, trail: [], trailAt: 0, host: null, orbitRadius: 0, orbitDirection: 1, captureAfter: 0, cooldown: 0, phase: random(0, Math.PI * 2) };
+    const body = { id: nextId++, x, y, px: x, py: y, vx, vy, ax: 0, ay: 0, mass, integrity: 1, natural: naturalType !== null, type: naturalType, civ: CIV.create(), artifacts: [], kills: { planet: 0, mothership: 0 }, nextAttack: 0, nextAbsorb: 0, recallUntil: 0, hazardReady: 0, alive: true, trail: [], trailAt: 0, host: null, orbitRadius: 0, orbitDirection: 1, captureAfter: 0, cooldown: 0, phase: random(0, Math.PI * 2) };
     updateSize(body);
     GRAVITY.limitVelocity(body);
     bodies.push(body);
@@ -331,7 +331,6 @@
     const oldType = body.type;
     body.mass += amount;
     body.integrity = Math.min(1, (Math.max(0, bodyMass(body) - amount) * body.integrity + amount) / bodyMass(body));
-    body.healthyMass = Math.max(body.healthyMass, bodyMass(body));
     updateSize(body);
     if (body === player) {
       peakMass = Math.max(peakMass, bodyMass(body));
@@ -445,7 +444,7 @@
     const owner = gun.owner, range = CIV.stats(owner).range;
     let target = null, priority = Infinity, nearest = Infinity;
     for (const candidate of fleets.nearby(gun, range)) {
-      if (!candidate.alive || candidate.natural || candidate.mode === "dock" ||
+      if (!candidate.alive || candidate.natural || candidate.mode === "dock" || candidate.devouredBy === owner.id ||
           candidate.ownerId === owner.id || (!candidate.entity && sameSystem(owner, candidate))) continue;
       const distance = Math.hypot(candidate.x - gun.x, candidate.y - gun.y);
       if (distance > range) continue;
@@ -856,52 +855,116 @@
   function playerSnapshot() {
     const c = player.civ;
     return {
-      version: 4, savedAt: Date.now(), mass: player.mass, vx: player.vx, vy: player.vy,
-      healthyMass: player.healthyMass, integrity: player.integrity, peakMass, absorbed, elapsed: time, distance: driftDistance,
+      savedAt: Date.now(), mass: player.mass, vx: player.vx, vy: player.vy,
+      integrity: player.integrity, peakMass, absorbed, elapsed: time, distance: driftDistance,
       recallRemaining: Math.max(0, player.recallUntil - time),
-      civ: { ...c, cities: c.cities.map(city => ({ ...city, lastHit: Math.min(10, time - city.lastHit) })), projects: { ...c.projects },
-        lastHit: Math.min(10, time - c.lastHit), coreHitUntil: Math.max(0, c.coreHitUntil - time) },
+      // 只写需要持久化的字段；city/pressure/consumption/extinct 等派生值不保存，读取时用默认值并由 CIV.sync 重算。
+      civ: {
+        population: c.population, tech: c.tech, research: c.research, shield: c.shield,
+        lastHit: Math.min(10, time - c.lastHit), coreHitUntil: Math.max(0, c.coreHitUntil - time),
+        incubation: c.incubation,
+        cities: c.cities.map(city => ({ hp: city.hp, maxHp: city.maxHp, built: city.built, lastHit: Math.min(10, time - city.lastHit) })),
+        projects: { ...c.projects }
+      },
       fleet: fleets.snapshot(player, time),
       kills: { planet: player.kills.planet, mothership: player.kills.mothership }
     };
   }
 
-  function validSnapshot(s) {
-    if (!s || s.version !== 4 || !s.civ || !s.kills || !s.fleet) return false;
-    const c = s.civ, f = s.fleet;
-    const positive = values => values.every(n => typeof n === "number" && Number.isFinite(n) && n >= 0);
-    if (!positive([s.savedAt, s.mass, s.healthyMass, s.integrity, s.peakMass, s.absorbed, s.elapsed, s.distance,
-      s.recallRemaining, c.population, c.tech, c.research, c.shield, c.lastHit, c.coreHitUntil,
-      c.incubation, c.pressure, c.consumption, s.kills.planet, s.kills.mothership])) return false;
-    if (![s.vx, s.vy].every(Number.isFinite) || s.mass < .6 ||
-        s.integrity < 1 - CONFIG.combat.breakLoss || s.integrity > 1 || !Number.isInteger(c.tech) || c.tech > 7) return false;
-    if (typeof c.extinct !== "boolean" || typeof c.city !== "boolean" || c.population > 0 && c.population < CONFIG.civilization.extinctionPopulation) return false;
-    if (!Array.isArray(c.cities) || c.cities.length !== 2 || !c.projects) return false;
-    if (!c.cities.every((city, i) => city && positive([city.hp, city.maxHp, city.lastHit]) &&
-        city.maxHp === CONFIG.fleet.construction.cityHp[i] && city.hp <= city.maxHp &&
-        typeof city.built === "boolean" && (!city.built || city.hp > 0))) return false;
-    if (c.city !== c.cities.some(city => city.built && city.hp > 0)) return false;
-    if (!["shield", "gun", "carrier", "city0", "city1"].every(key => positive([c.projects[key]]) && c.projects[key] <= 1)) return false;
-    if (c.projects.devour !== undefined && !(positive([c.projects.devour]) && c.projects.devour <= 1)) return false;
-    if (c.shield > CIV.stats({ civ: c }).shield || c.population === 0 && (c.tech > 0 || c.shield > 0 || c.cities.some(city => city.hp > 0))) return false;
-    if (!Array.isArray(f.facilities) || !Array.isArray(f.planes) || f.facilities.length > 6 || f.planes.length > 12) return false;
+  const finite = (v, fallback) => typeof v === "number" && Number.isFinite(v) ? v : fallback;
+  const intIn = (v, fallback, min, max) => Math.max(min, Math.min(max, Math.round(finite(v, fallback))));
+  const clampIn = (v, fallback, min, max) => Math.max(min, Math.min(max, finite(v, fallback)));
+  const maxHitAgo = 1e9;
+  // 标准存档结构：读取时缺失或异常的字段一律回落到这里的默认值。
+  function defaultSave() {
+    return {
+      savedAt: 0,
+      mass: 8, vx: 0, vy: 0, integrity: 1, peakMass: 8,
+      absorbed: 0, elapsed: 0, distance: 0, recallRemaining: 0,
+      civ: {
+        population: 0, tech: 0, research: 0, shield: 0, lastHit: 10, coreHitUntil: 0, incubation: 0,
+        // 派生字段不持久化，恢复后由 CIV.sync / tick 重算。
+        city: false, pressure: 0, consumption: 0, extinct: false,
+        cities: CONFIG.fleet.construction.cityHp.map(maxHp => ({ hp: 0, maxHp, built: false, lastHit: 10 })),
+        projects: { shield: 0, gun: 0, carrier: 0, devour: 0, city0: 0, city1: 0 }
+      },
+      fleet: { facilities: [], planes: [], devourers: 0 },
+      kills: { planet: 0, mothership: 0 }
+    };
+  }
+  // 把任意历史数据规范化成标准存档；完全无法识别时返回 null。
+  function normalizeSave(raw) {
+    if (!raw || typeof raw !== "object" || !Number.isFinite(raw.mass)) return null;
+    const s = defaultSave(), c = s.civ;
+    s.savedAt = Math.max(0, finite(raw.savedAt, 0));
+    s.mass = Math.max(.6, finite(raw.mass, s.mass));
+    s.vx = finite(raw.vx, 0); s.vy = finite(raw.vy, 0);
+    s.peakMass = Math.max(s.mass, finite(raw.peakMass, s.mass));
+    s.integrity = clampIn(raw.integrity, 1, 1 - CONFIG.combat.breakLoss, 1);
+    s.absorbed = Math.max(0, Math.round(finite(raw.absorbed, 0)));
+    s.elapsed = Math.max(0, finite(raw.elapsed, 0));
+    s.distance = Math.max(0, finite(raw.distance, 0));
+    s.recallRemaining = Math.max(0, finite(raw.recallRemaining, 0));
+
+    const rc = raw.civ && typeof raw.civ === "object" ? raw.civ : {};
+    c.population = Math.max(0, finite(rc.population, 0));
+    if (c.population > 0 && c.population < CONFIG.civilization.extinctionPopulation) c.population = 0;
+    c.tech = intIn(rc.tech, 0, 0, 7);
+    c.research = Math.max(0, finite(rc.research, 0));
+    c.shield = Math.max(0, finite(rc.shield, 0));
+    c.lastHit = clampIn(rc.lastHit, 10, 0, maxHitAgo);
+    c.coreHitUntil = Math.max(0, finite(rc.coreHitUntil, 0));
+    c.incubation = Math.max(0, finite(rc.incubation, 0));
+    const cities = Array.isArray(rc.cities) ? rc.cities : [];
+    c.cities = CONFIG.fleet.construction.cityHp.map((maxHp, i) => {
+      const src = cities[i] && typeof cities[i] === "object" ? cities[i] : {};
+      const hp = clampIn(src.hp, 0, 0, maxHp), built = src.built === true && hp > 0;
+      return { hp: built ? hp : 0, maxHp, built, lastHit: clampIn(src.lastHit, 10, 0, maxHitAgo) };
+    });
+    const projects = rc.projects && typeof rc.projects === "object" ? rc.projects : {};
+    for (const key of Object.keys(c.projects)) c.projects[key] = clampIn(projects[key], 0, 0, 1);
+    // 无人口却带着科技/城市/设施属于异常，统一回落到新生状态。
+    if (c.population === 0) {
+      c.tech = 0; c.research = 0; c.incubation = 0; c.shield = 0; c.coreHitUntil = 0;
+      c.cities = CONFIG.fleet.construction.cityHp.map(maxHp => ({ hp: 0, maxHp, built: false, lastHit: 10 }));
+      for (const key of Object.keys(c.projects)) c.projects[key] = 0;
+    }
+    c.city = c.cities.some(city => city.built && city.hp > 0);
+    c.shield = Math.min(c.shield, CIV.stats({ civ: c }).shield);
+
+    const rk = raw.kills && typeof raw.kills === "object" ? raw.kills : {};
+    s.kills.planet = Math.max(0, Math.round(finite(rk.planet, 0)));
+    s.kills.mothership = Math.max(0, Math.round(finite(rk.mothership, 0)));
+
+    const rf = raw.fleet && typeof raw.fleet === "object" ? raw.fleet : {};
     const slots = new Set();
-    for (const u of f.facilities) {
-      if (!u || !["carrier", "gun"].includes(u.entity) || !u.orbitMotion ||
-          !positive([u.slot, u.hp, u.maxHp, u.hitAgo, u.buildProgress, u.launchRemaining, u.attackRemaining]) ||
-          !Number.isInteger(u.slot) || u.slot > 2 || u.hp <= 0 || u.hp > u.maxHp || u.buildProgress > 1 ||
-          ![u.orbitMotion.x, u.orbitMotion.y, u.orbitMotion.vx, u.orbitMotion.vy].every(Number.isFinite)) return false;
-      if (c.tech < (u.entity === "gun" ? 2 : 3) || slots.has(u.entity + u.slot)) return false;
-      slots.add(u.entity + u.slot);
+    for (const u of Array.isArray(rf.facilities) ? rf.facilities : []) {
+      const entity = u && (u.entity === "gun" || u.entity === "carrier") ? u.entity : null;
+      if (!entity || c.tech < (entity === "gun" ? 2 : 3)) continue;
+      const slot = intIn(u.slot, 0, 0, 2), key = entity + slot;
+      if (slots.has(key)) continue;
+      const maxHp = Math.max(1, finite(u.maxHp, entity === "gun" ? CONFIG.fleet.gunHp : CONFIG.fleet.carrierHp));
+      const hp = clampIn(u.hp, maxHp, .01, maxHp);
+      slots.add(key);
+      const om = u.orbitMotion && typeof u.orbitMotion === "object" ? u.orbitMotion : {};
+      s.fleet.facilities.push({ entity, slot, hp, maxHp, hitAgo: clampIn(u.hitAgo, 10, 0, maxHitAgo),
+        buildProgress: clampIn(u.buildProgress, 0, 0, 1), orbitMotion: { x: finite(om.x, 0), y: finite(om.y, 0), vx: finite(om.vx, 0), vy: finite(om.vy, 0) },
+        launchRemaining: Math.max(0, finite(u.launchRemaining, 0)), attackRemaining: Math.max(0, finite(u.attackRemaining, 0)) });
+      if (s.fleet.facilities.length >= 6) break;
     }
-    const spec = CONFIG.fleet.grades[Math.min(3, Math.max(0, c.tech - 3))];
-    for (const p of f.planes) {
-      if (!p || !slots.has("carrier" + p.motherSlot) || ![p.x, p.y, p.vx, p.vy].every(Number.isFinite) ||
-          !positive([p.hp, p.hitAgo, p.shots, p.readyRemaining, p.flightAge, p.enduranceRemaining, p.attackRemaining]) ||
-          p.hp <= 0 || p.hp > spec.hp || p.shots > spec.ammo || typeof p.docked !== "boolean") return false;
+    const spec = CONFIG.fleet.gradeFor(c.tech);
+    for (const p of Array.isArray(rf.planes) ? rf.planes : []) {
+      const motherSlot = p && intIn(p.motherSlot, 0, 0, 2);
+      if (!p || !slots.has("carrier" + motherSlot)) continue;
+      const hp = clampIn(p.hp, spec.hp, .01, spec.hp);
+      s.fleet.planes.push({ motherSlot, x: finite(p.x, 0), y: finite(p.y, 0), vx: finite(p.vx, 0), vy: finite(p.vy, 0),
+        hp, hitAgo: clampIn(p.hitAgo, 10, 0, maxHitAgo), shots: intIn(p.shots, 0, 0, spec.ammo), docked: p.docked === true,
+        readyRemaining: Math.max(0, finite(p.readyRemaining, 0)), flightAge: Math.max(0, finite(p.flightAge, 0)),
+        enduranceRemaining: Math.max(0, finite(p.enduranceRemaining, 0)), attackRemaining: Math.max(0, finite(p.attackRemaining, 0)) });
+      if (s.fleet.planes.length >= 12) break;
     }
-    if (f.devourers !== undefined && !(Number.isInteger(f.devourers) && f.devourers >= 0 && f.devourers <= 2)) return false;
-    return s.healthyMass + .00001 >= s.mass && s.peakMass + .00001 >= s.mass;
+    s.fleet.devourers = intIn(rf.devourers, 0, 0, 2);
+    return s;
   }
 
   const savePrefix = () => CONFIG.savePrefix + ":";
@@ -911,8 +974,8 @@
       const key = localStorage.key(i);
       if (!key || !key.startsWith(savePrefix())) continue;
       try {
-        const snapshot = JSON.parse(localStorage.getItem(key));
-        if (validSnapshot(snapshot)) saves.push({ key, name: key.slice(savePrefix().length), snapshot });
+        const snapshot = normalizeSave(JSON.parse(localStorage.getItem(key)));
+        if (snapshot) saves.push({ key, name: key.slice(savePrefix().length), snapshot });
       } catch (error) { /* 跳过无法解析的存档 */ }
     }
     return saves.sort((a, b) => b.snapshot.savedAt - a.snapshot.savedAt);
@@ -965,12 +1028,11 @@
   }
 
   function restorePlayer(snapshot) {
-    player.mass = snapshot.mass; player.healthyMass = snapshot.healthyMass; player.integrity = snapshot.integrity;
+    player.mass = snapshot.mass; player.integrity = snapshot.integrity;
     time = snapshot.elapsed; peakMass = snapshot.peakMass; absorbed = snapshot.absorbed; driftDistance = snapshot.distance;
-    // 合并默认字段，兼容旧存档缺失的建造项（例如 devour）。
-    player.civ = { ...CIV.create(), ...snapshot.civ, cities: snapshot.civ.cities.map(city => ({ ...city, lastHit: time - city.lastHit })),
-      projects: { ...CIV.create().projects, ...snapshot.civ.projects },
-      lastHit: time - snapshot.civ.lastHit, coreHitUntil: time + snapshot.civ.coreHitUntil };
+    // snapshot 已由 normalizeSave 规范化，直接使用；lastHit 存的是「秒前」，换算回当前时间。
+    player.civ = { ...snapshot.civ, cities: snapshot.civ.cities.map(city => ({ ...city, lastHit: time - city.lastHit })),
+      projects: { ...snapshot.civ.projects }, lastHit: time - snapshot.civ.lastHit, coreHitUntil: time + snapshot.civ.coreHitUntil };
     player.kills = { planet: snapshot.kills.planet, mothership: snapshot.kills.mothership };
     player.recallUntil = time + snapshot.recallRemaining; nextPopulation = time + 2;
     player.vx = snapshot.vx; player.vy = snapshot.vy;
@@ -1315,19 +1377,26 @@
 
   function drawDevourer(ship, x, y, r) {
     const owner = ship.owner, zoom = camera.zoom;
-    if (ship.state === "anchor" && ship.target?.alive) {
+    if ((ship.state === "wrapping" || ship.state === "anchor") && ship.target?.alive) {
       const tx = screenX(ship.target.x), ty = screenY(ship.target.y), tr = ship.target.radius * zoom;
       const style = owner.civ.tech >= 7 ? 2 : owner.civ.tech >= 5 ? 1 : 0;
+      const wrapping = ship.state === "wrapping";
+      const progress = Math.max(0, Math.min(1, 1 - (ship.harvestAt - time) / CONFIG.fleet.devour.wrapDuration));
+      const closure = progress * progress * (3 - 2 * progress);
+      const energy = wrapping ? .2 + .35 * closure : .7 + .1 * Math.sin(time * 3);
       ctx.save();
       for (let layer = 0; layer <= style; layer++) {
-        const radius = tr + (4 + layer * 3) * zoom, segments = 8 + style * 4 + layer * 2;
-        ctx.beginPath(); ctx.arc(tx, ty, radius, 0, TAU);
+        const radius = tr + (4 + layer * 3 + (1 - closure) * 12) * zoom, segments = 8 + style * 4 + layer * 2;
+        const rotation = time * (layer % 2 ? -.3 : .4) + layer;
+        ctx.beginPath(); ctx.arc(tx, ty, radius, rotation, rotation + TAU * (.08 + .92 * closure));
         ctx.strokeStyle = layer ? "#8aa6bbaa" : "#cbdae8cc";
         ctx.lineWidth = Math.max(.5, (1.3 - layer * .2) * zoom); ctx.stroke();
         for (let i = 0; i < segments; i++) {
-          const a = time * .4 + i * TAU / segments + layer;
+          const a = rotation + i * TAU / segments;
+          ctx.save(); ctx.translate(tx + Math.cos(a) * radius, ty + Math.sin(a) * radius); ctx.rotate(a);
           ctx.fillStyle = i % 2 ? "#8fd3e8" : "#b8c4d0";
-          ctx.fillRect(tx + Math.cos(a) * radius - zoom, ty + Math.sin(a) * radius - zoom, 2 * zoom, 2 * zoom);
+          ctx.fillRect(-zoom, -2 * zoom, 2 * zoom, 4 * zoom);
+          ctx.restore();
         }
       }
       if (style === 2) {
@@ -1336,11 +1405,49 @@
         ctx.strokeStyle = "#c7a6ff"; ctx.lineWidth = Math.max(.6, 1.4 * zoom); ctx.stroke();
       }
       ctx.restore();
-      // 微微闪烁的连线，向主星传递质量。
-      ctx.save(); ctx.globalAlpha = .1 + .08 * Math.sin(time * 7 + ship.id);
-      ctx.strokeStyle = "#bfe9ff"; ctx.lineWidth = Math.max(.5, .6 * zoom);
-      ctx.setLineDash([2 * zoom, 6 * zoom]);
-      ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(screenX(owner.x), screenY(owner.y)); ctx.stroke();
+      // 能量薄膜包裹目标，吞噬开始后沿弧线向主星方向输送粒子。
+      const ox = screenX(owner.x), oy = screenY(owner.y);
+      const toOwner = Math.atan2(oy - ty, ox - tx), pulse = .5 + .5 * Math.sin(time * 3 + ship.id);
+      const nx = Math.cos(toOwner + Math.PI / 2), ny = Math.sin(toOwner + Math.PI / 2);
+      const base = tr + 4 * zoom, len = Math.max(16, tr * .9), spread = Math.max(3, tr * .3);
+      const bx = tx + Math.cos(toOwner) * base, by = ty + Math.sin(toOwner) * base;
+      ctx.save(); ctx.globalCompositeOperation = "lighter";
+      const haloRadius = Math.max(1, tr + 12 * zoom);
+      const halo = ctx.createRadialGradient(tx, ty, Math.max(0, tr * .65), tx, ty, haloRadius);
+      halo.addColorStop(0, "#7ddfff00");
+      halo.addColorStop(.6, style === 2 ? "#b69aff55" : "#76dfff55");
+      halo.addColorStop(1, "#7ddfff00");
+      ctx.globalAlpha = energy;
+      circle(tx, ty, haloRadius, halo);
+      for (let i = 0; i < 3; i++) {
+        const a0 = time * (.5 + i * .2) + i * 2.1;
+        ctx.globalAlpha = energy * (.35 + .3 * pulse) * (1 - i * .22);
+        ctx.beginPath(); ctx.arc(tx, ty, tr + (3 + i * 2) * zoom, a0, a0 + 1.5);
+        ctx.strokeStyle = i % 2 ? "#9fd6ff" : "#cfeaff";
+        ctx.lineWidth = Math.max(.6, 1.3 * zoom); ctx.stroke();
+      }
+      if (!wrapping) {
+        const flowAge = Math.max(0, time - ship.harvestAt);
+        const strength = Math.min(1, flowAge * 2);
+        for (let lane = -1; lane <= 1; lane++) {
+          const sx = tx - Math.cos(toOwner) * tr * .6 + nx * lane * tr * .65;
+          const sy = ty - Math.sin(toOwner) * tr * .6 + ny * lane * tr * .65;
+          const cx = bx + nx * lane * (tr + spread);
+          const cy = by + ny * lane * (tr + spread);
+          const ex = bx + Math.cos(toOwner) * len * 2;
+          const ey = by + Math.sin(toOwner) * len * 2;
+          ctx.globalAlpha = .16 * strength; ctx.strokeStyle = "#a5e8ff";
+          ctx.lineWidth = Math.max(.5, zoom);
+          ctx.beginPath(); ctx.moveTo(sx, sy); ctx.quadraticCurveTo(cx, cy, ex, ey); ctx.stroke();
+          for (let i = 0; i < 5; i++) {
+            const p = (flowAge * .65 + i / 5 + (lane + 1) * .13) % 1, q = 1 - p;
+            ctx.globalAlpha = Math.sin(p * Math.PI) * strength * .8;
+            circle(q * q * sx + 2 * q * p * cx + p * p * ex,
+              q * q * sy + 2 * q * p * cy + p * p * ey,
+              Math.max(.6, (1.5 - p * .7) * zoom), "#dcfaff");
+          }
+        }
+      }
       ctx.restore();
     }
     ctx.save(); ctx.translate(x, y); ctx.rotate(time * .5 + ship.id);
@@ -1400,8 +1507,11 @@
     }
     else {
       const isDrone = ship.entity === "drone", player0 = isDrone && ship.owner === player;
-      const edge = isDrone ? "#d0f6ff" : CONFIG.nests.grades[ship.grade].color;
-      const hull = isDrone ? (player0 ? "#74c9d1" : "#bc8ade") : CONFIG.nests.grades[ship.grade].hull;
+      // 7 级舰载机：黑色机身 + 光效描边。
+      const elite = isDrone && ship.owner && ship.owner.civ && ship.owner.civ.tech >= 7;
+      const tint = elite ? (player0 ? "#7ff0ff" : "#cf9dff") : null;
+      const edge = isDrone ? tint || "#d0f6ff" : CONFIG.nests.grades[ship.grade].color;
+      const hull = elite ? "#070a12" : isDrone ? (player0 ? "#74c9d1" : "#bc8ade") : CONFIG.nests.grades[ship.grade].hull;
       // 细长箭形机身 + 两侧后掠翼
       ctx.beginPath();
       ctx.moveTo(r, 0);
@@ -1411,8 +1521,10 @@
       ctx.lineTo(-r * .95, -r * .46);
       ctx.lineTo(-r * .1, -r * .72);
       ctx.closePath();
+      if (elite) { ctx.shadowColor = tint; ctx.shadowBlur = Math.max(3, r * 1.6); }
       ctx.fillStyle = hull; ctx.fill();
-      ctx.strokeStyle = edge; ctx.lineWidth = .7; ctx.stroke();
+      ctx.strokeStyle = edge; ctx.lineWidth = elite ? Math.max(.9, camera.zoom) : .7; ctx.stroke();
+      if (elite) { ctx.shadowBlur = 0; glow(r * .3, 0, r * 1.3, tint + "33"); }
       const speed = Math.hypot(ship.vx, ship.vy);
       if (speed > 1 && r > 2.2) {
         ctx.beginPath();
@@ -1420,10 +1532,12 @@
         ctx.lineTo(-r * (1 + Math.min(1, speed * .015)), 0);
         ctx.lineTo(-r * .8, r * .2);
         ctx.closePath();
-        ctx.fillStyle = !isDrone ? edge + "cc" : player0 ? "#9fe8ffcc" : "#d9b6ffcc";
+        if (elite) ctx.shadowBlur = Math.max(3, r * 1.4);
+        ctx.fillStyle = elite ? tint + "ee" : !isDrone ? edge + "cc" : player0 ? "#9fe8ffcc" : "#d9b6ffcc";
         ctx.fill();
+        if (elite) ctx.shadowBlur = 0;
       }
-      circle(r * .3, 0, Math.max(.4, r * .18), isDrone ? "#eafcff" : edge);
+      circle(r * .3, 0, Math.max(.4, r * .18), elite ? tint : isDrone ? "#eafcff" : edge);
     }
     ctx.restore();
     if (ship.impact && time - ship.impact.at < .24) {
@@ -1473,7 +1587,7 @@
       ctx.strokeStyle = color; ctx.stroke();
     };
     if (artifacts.some(unit => unit.entity === "carrier" || unit.entity === "drone")) {
-      const grade = CONFIG.fleet.grades[Math.min(3, Math.max(0, player.civ.tech - 3))];
+      const grade = CONFIG.fleet.gradeFor(player.civ.tech);
       ring(player, grade.range, "#82cfd32b", [5, 9]);
     }
     const attackRange = CIV.stats(player).range;

@@ -40,7 +40,7 @@ globalThis.SolarArtifacts = (() => {
     const artifacts = body.artifacts.filter(unit => unit.alive);
     const guns = artifacts.filter(unit => unit.entity === "gun").sort((a, b) => a.slot - b.slot);
     const mothers = artifacts.filter(unit => unit.entity === "carrier").sort((a, b) => a.slot - b.slot);
-    const spec = cfg.grades[Math.min(3, Math.max(0, c.tech - 3))];
+    const spec = cfg.gradeFor(c.tech);
     const lowMass = body.mass <= SolarConfig.civilization.minimumMass;
     const ordered = [];
     for (const entry of rows.values()) entry.seen = false;
@@ -105,7 +105,7 @@ globalThis.SolarArtifacts = (() => {
     }
     const devourers = artifacts.filter(unit => unit.entity === "devourer").sort((a, b) => a.id - b.id);
     devourers.forEach((unit, index) => {
-      const status = { orbit: "Patrolling", travel: "Deploying", anchor: "Devouring", return: "Recovering" }[unit.state] || "Operational";
+      const status = { orbit: "Patrolling", travel: "Deploying", wrapping: "Enveloping", anchor: "Devouring", return: "Recovering" }[unit.state] || "Operational";
       add("devourer" + unit.id, `Devourer ship ${index + 1}`, status, unit.hp, unit.maxHp);
     });
     // 删除失效行时同时释放语言绑定，避免长期游戏积累节点。
