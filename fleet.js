@@ -52,7 +52,7 @@ globalThis.SolarFleet = {
     // 无抵抗能力的天体：无护盾/城市/舰队的行星；7 级起可吞恒星，虚空永不可吞。
     function devourable(owner, target) {
       if (!target.alive || target.entity || own(owner, target) || target.devouredBy) return false;
-      if (target.natural) return target.type === 10 ? owner.civ.tech >= 10 : owner.civ.tech >= 7;
+      if (target.natural) return SolarConfig.types[target.type].kind === "black-hole" ? owner.civ.tech >= 10 : owner.civ.tech >= 7;
       return !CIV.hasProducts(target);
     }
     function enemy(owner, target) {
@@ -347,8 +347,8 @@ globalThis.SolarFleet = {
             }
             continue;
           }
-          // 沿用舰载机的出航速度门槛，按吞星船自身航速判断。
-          if (unit.state === "return" || launchRate(owner, devour) <= 0 || now < unit.nextSearch) continue;
+          // 出航速度门槛与舰载机一致，按当前科技等级的舰队航速判断。
+          if (unit.state === "return" || launchRate(owner, spec) <= 0 || now < unit.nextSearch) continue;
           unit.nextSearch = now + cfg.searchInterval;
           if (hostileNearby(owner, spec.range)) continue;
           let best = null, bestMass = -Infinity, bestDistance = Infinity;
@@ -440,7 +440,7 @@ globalThis.SolarFleet = {
         }
         if (unit.state === "return") {
           const dest = berthDesired(owner, berth, unit);
-          SolarFleet.steer(unit, dest, devour.speed, cfg.acceleration, cfg.steering, 0, dt);
+          SolarFleet.steer(unit, dest, spec.speed, cfg.acceleration, cfg.steering, 0, dt);
           unit.x += unit.vx * dt; unit.y += unit.vy * dt;
           if (Math.hypot(unit.x - dest.x, unit.y - dest.y) < 8) unit.state = "orbit";
           if (distance(unit, owner) > spec.range) context.damage(unit, devour.overrunDamage * dt, null, "overrun");
@@ -477,7 +477,7 @@ globalThis.SolarFleet = {
         const reach = distance(unit, t);
         if (reach < unit.bestDistance - .5) { unit.bestDistance = reach; unit.progressAt = now; }
         else if (now - unit.progressAt > 8) { releaseDevourer(unit); unit.target = null; unit.state = "return"; continue; }
-        SolarFleet.steer(unit, t, devour.speed, cfg.acceleration, cfg.steering, stop, dt);
+        SolarFleet.steer(unit, t, spec.speed, cfg.acceleration, cfg.steering, stop, dt);
         unit.x += unit.vx * dt; unit.y += unit.vy * dt;
         if (distance(unit, t) <= stop + 3) {
           if (t.devourerClaim === unit.id) t.devourerClaim = null;

@@ -10,8 +10,11 @@ globalThis.SolarConfig = {
     { name: "Gaia", min: 350, radius: 6, color: "#8f9dff", kind: "rock", level: 4, gravityRange: 170 },
     { name: "Halo", min: 800, radius: 7, color: "#539dff", kind: "ice", level: 5, gravityRange: 210 },
     { name: "Titan", min: 1600, radius: 7.5, color: "#e5b65f", kind: "gas", level: 6, gravityRange: 210 },
-    { name: "Sol", mass: 8000, radius: 13, color: "#ffda78", kind: "star", natural: true, gravityRange: 280, hazardRange: 64 },
+    { name: "Red Dwarf", mass: 4000, radius: 8, color: "#ff8d6b", kind: "star", natural: true, gravityRange: 240, hazardRange: 48, rays: 6 },
+    { name: "Sol", mass: 8000, radius: 13, color: "#ffda78", kind: "star", natural: true, gravityRange: 280, hazardRange: 64, rays: 10 },
+    { name: "Blue Giant", mass: 12000, radius: 16, color: "#8fc3ff", kind: "star", natural: true, gravityRange: 320, hazardRange: 88, rays: 14 },
     { name: "Pulsar", mass: 14000, radius: 9, color: "#a28aff", kind: "neutron", natural: true, gravityRange: 330, hazardRange: 32 },
+    { name: "Red Supergiant", mass: 20000, radius: 21, color: "#ff6f5c", kind: "star", natural: true, gravityRange: 360, hazardRange: 110, rays: 12 },
     { name: "Void", mass: 24000, radius: 9, color: "#c49aff", kind: "black-hole", natural: true, gravityRange: 380, hazardRange: 40 },
     { name: "Hyperion", min: 8000, radius: 13, color: "#f4f8ff", kind: "gas", level: 7, gravityRange: 280 }
   ],
@@ -93,7 +96,7 @@ globalThis.SolarConfig = {
     devour: {
       limit: [0, 0, 1, 1, 1, 2, 2, 2],
       hp: [0, 0, 420, 560, 720, 900, 1100, 1350],
-      radius: 1.6, speed: 50, towSpeed: 55, towGap: 14, towOrbit: .06,
+      radius: 1.6, towSpeed: 55, towGap: 14, towOrbit: .06,
       rate: 4, ratePerTech: 1.5, rateFactor8: 1.5, overrunDamage: 8, wrapDuration: 3
     },
     // 吞星船港口：与母舰同轨、体积更大、血量高且可被攻击，无攻击能力，用于停泊两艘吞星船。
@@ -108,6 +111,7 @@ globalThis.SolarConfig = {
     naturalSpacing: 1100, naturalGuardSafeRadius: 900,
     largePlanetLimit: 4, advancedCivilizationLimit: 2,
     planetWeights: [45, 28, 16, 7, 3, 1],
+    starWeights: [25, 38, 14, 15, 5, 3],
     technologyWeights: [40, 30, 18, 8, 3, .8, .18, .02]
   },
   combat: { tick: .1, collisionMinLoss: .02, collisionMaxLoss: .24, breakLoss: .7 },

@@ -9,6 +9,9 @@
   const STEP = CONFIG.physicsStep, WORLD_RADIUS = 1800;
   const CAPTURE = CONFIG.capture;
   const POPULATION = CONFIG.population;
+  const SOL = TYPES.findIndex(type => type.name === "Sol");
+  const STAR_START = TYPES.findIndex(type => type.natural);
+  const STARS = TYPES.map((type, index) => ({ type, index })).filter(entry => entry.type.natural && entry.type.kind === "star");
   let universeSeed = 0;
   let regions = SolarRegions.create(regionRandom), activeRegions = [], seededSystems = new Set(), guardNests = new Set();
   let width, height, dpr, stars, nebula;
@@ -68,6 +71,18 @@
     for (let i = 7; i >= 1; i--) if (mass >= TYPES[i].min) return i;
     return 0;
   };
+  function starFormIndex(mass) {
+    let index = STARS[0].index;
+    for (const entry of STARS) if (entry.type.mass <= mass) index = entry.index;
+    return index;
+  }
+  // 天然天体被采集后逐级降档：恒星按质量退回更低形态，低于行星尺度则转为普通行星；虚空不变。
+  function demoteNatural(target) {
+    const type = TYPES[target.type];
+    if (type.kind === "black-hole" || target.mass >= type.mass) return;
+    if (target.mass < TYPES[7].min) { target.natural = false; target.civ = CIV.create(); target.integrity = 1; return; }
+    target.type = starFormIndex(target.mass);
+  }
 
   function updateSize(body) {
     if (body.natural) { body.radius = TYPES[body.type].radius * (.7 + .3 * Math.min(1, body.mass / TYPES[body.type].mass)); return; }
@@ -146,7 +161,7 @@
           bodies.filter(b => b.alive && b.natural).length >= POPULATION.naturalLimit ||
           naturalSpawnBlocked(region.x, region.y)) continue;
       if (bodies.some(b => b.alive && Math.hypot(b.x - region.x, b.y - region.y) < 300)) continue;
-      const star = createBody(region.x, region.y, TYPES[8].mass, initialVelocity(TYPES[8].mass), 8);
+      const star = createBody(region.x, region.y, TYPES[SOL].mass, initialVelocity(TYPES[SOL].mass), SOL);
       for (let i = 0; i < 2; i++) {
         const radius = 130 + i * 70, angle = region.angle + i * Math.PI;
         const planet = createBody(star.x + Math.cos(angle) * radius, star.y + Math.sin(angle) * radius, 30 + i * 45);
@@ -186,10 +201,10 @@
     let mass;
     if (roll < (region?.kind === "belt" ? .97 : POPULATION.asteroidChance)) mass = random(1, 11);
     else if (roll > 1 - POPULATION.naturalChance && bodies.filter(b => b.alive && b.natural).length < POPULATION.naturalLimit && !naturalSpawnBlocked(position.x, position.y)) {
-      const type = weightedIndex([75, 20, 5]) + 8;
+      const type = STAR_START + weightedIndex(POPULATION.starWeights);
       const star = createBody(position.x, position.y, TYPES[type].mass, initialVelocity(TYPES[type].mass), type);
       // 恒星/中子星必须随行护卫：高级巢穴舰队，或自带科技文明的行星；虚空不设护卫。
-      if (type < 10) guardStar(star);
+      if (TYPES[type].kind !== "black-hole") guardStar(star);
       return;
     } else {
       let type = weightedIndex(POPULATION.planetWeights) + 2;
@@ -878,7 +893,7 @@
 
   function harvestMass(target, amount, owner, now) {
     if (!target.alive || amount <= 0 || target === owner || target.host === owner.id ||
-        target.natural && (target.type === 10 ? owner.civ.tech < 10 : owner.civ.tech < 7) ||
+        target.natural && (TYPES[target.type].kind === "black-hole" ? owner.civ.tech < 10 : owner.civ.tech < 7) ||
         !target.natural && CIV.hasProducts(target)) return 0;
     const before = target.mass, taken = Math.min(before, amount);
     target.mass -= taken;
@@ -892,10 +907,7 @@
       if (target.natural) { target.alive = false; burst(target.x, target.y, "#ffdc94", 20, 20); }
       else destroyUnit(target, owner, "harvest");
     } else {
-      if (target.natural && target.type === 9 && target.mass < 8000) target.type = 8;
-      if (target.natural && target.type === 8 && target.mass < 1600) {
-        target.natural = false; target.civ = CIV.create(); target.integrity = 1;
-      }
+      if (target.natural) demoteNatural(target);
       updateSize(target);
     }
     return taken;
@@ -1275,10 +1287,11 @@
     } else if (kind === "star") {
       const pulse = Math.sin(time * 1.5 + b.phase);
       ctx.save(); ctx.globalCompositeOperation = "lighter";
+      const rays = TYPES[b.type].rays || 10;
       glow(x, y, r * (10 + pulse * .5), `${color}20`);
       glow(x, y, r * (5 + pulse * .3), `${color}45`);
-      for (let i = 0; i < 10; i++) {
-        const angle = b.phase + i * Math.PI / 5 + time * .025;
+      for (let i = 0; i < rays; i++) {
+        const angle = b.phase + i * Math.PI * 2 / rays + time * .025;
         const length = r * (2.8 + .6 * Math.sin(time * .7 + i));
         const corona = ctx.createLinearGradient(x, y, x + Math.cos(angle) * length, y + Math.sin(angle) * length);
         corona.addColorStop(0, `${color}88`); corona.addColorStop(1, `${color}00`);
